@@ -55,6 +55,7 @@ export interface Gym {
   whatsappUsage: WhatsAppUsageData;
   upiId?: string;
   gymDisplayName?: string;
+  businessType?: import('@/data/businessTypes').BusinessType;
 }
 
 export interface Subscription {
@@ -107,6 +108,7 @@ export interface Member {
   notes: string;
   lastPaymentDate?: string;
   lastPaymentMethod?: PaymentMethod;
+  category?: string;
 }
 
 export interface Payment {
@@ -197,7 +199,7 @@ export const gyms: Gym[] = [
   {
     id: '1', name: 'FitZone Gym', ownerName: 'Rahul Sharma', phone: '+91 98765 43210',
     planId: '2', status: 'active', membersCount: 145, startDate: '2024-01-15', expiryDate: '2025-01-15',
-    wa_mode: 'dedicated',
+    wa_mode: 'dedicated', businessType: 'gym',
     whatsappUsage: {
       messagesUsed: 3200, planLimit: 5000, messagesFailed: 45, deliveryRate: 98.6,
       conversationsThisMonth: 1920, dailySafeLimit: 200, phoneNumber: '+91 99999 00001',
@@ -207,15 +209,15 @@ export const gyms: Gym[] = [
     upiId: 'fitzone@upi', gymDisplayName: 'FitZone Gym',
   },
   {
-    id: '2', name: 'Iron Paradise', ownerName: 'Priya Patel', phone: '+91 87654 32109',
-    planId: '1', status: 'active', membersCount: 78, startDate: '2024-03-01', expiryDate: '2025-03-01',
-    wa_mode: 'shared',
+    id: '2', name: 'Serene Yoga Studio', ownerName: 'Priya Patel', phone: '+91 87654 32109',
+    planId: '1', status: 'active', membersCount: 45, startDate: '2024-03-01', expiryDate: '2025-03-01',
+    wa_mode: 'shared', businessType: 'yoga',
     whatsappUsage: { messagesUsed: 420, planLimit: 1000 },
   },
   {
     id: '3', name: 'PowerHouse Fitness', ownerName: 'Vikram Singh', phone: '+91 76543 21098',
     planId: '2', status: 'suspended', membersCount: 0, startDate: '2024-06-10', expiryDate: '2024-12-10',
-    wa_mode: 'dedicated',
+    wa_mode: 'dedicated', businessType: 'fitness',
     whatsappUsage: {
       messagesUsed: 0, planLimit: 5000, messagesFailed: 0, deliveryRate: 0,
       conversationsThisMonth: 0, dailySafeLimit: 200, phoneNumber: '+91 99999 00003',
@@ -226,13 +228,13 @@ export const gyms: Gym[] = [
   {
     id: '4', name: 'Muscle Factory', ownerName: 'Deepak Rao', phone: '+91 65432 10987',
     planId: '1', status: 'frozen', membersCount: 52, startDate: '2024-04-01', expiryDate: '2025-02-01', gracePeriodDays: 0,
-    wa_mode: 'shared',
+    wa_mode: 'shared', businessType: 'gym',
     whatsappUsage: { messagesUsed: 490, planLimit: 1000 },
   },
   {
     id: '5', name: 'FlexFit Studio', ownerName: 'Ananya Joshi', phone: '+91 54321 09876',
     planId: '2', status: 'frozen', membersCount: 91, startDate: '2024-05-15', expiryDate: '2025-01-15', gracePeriodDays: 0,
-    wa_mode: 'dedicated',
+    wa_mode: 'dedicated', businessType: 'personal_training',
     whatsappUsage: {
       messagesUsed: 5400, planLimit: 5000, messagesFailed: 120, deliveryRate: 97.8,
       conversationsThisMonth: 3240, dailySafeLimit: 200, phoneNumber: '+91 99999 00005',
@@ -243,8 +245,14 @@ export const gyms: Gym[] = [
   {
     id: '6', name: 'Peak Performance', ownerName: 'Sanjay Verma', phone: '+91 43210 98765',
     planId: '1', status: 'grace_period', membersCount: 34, startDate: '2024-07-01', expiryDate: '2025-02-20', gracePeriodDays: 7,
-    wa_mode: 'shared',
+    wa_mode: 'shared', businessType: 'gym',
     whatsappUsage: { messagesUsed: 1050, planLimit: 1000 },
+  },
+  {
+    id: '7', name: 'Rhythm Dance Academy', ownerName: 'Kavita Sharma', phone: '+91 32109 87654',
+    planId: '1', status: 'active', membersCount: 60, startDate: '2024-08-01', expiryDate: '2025-08-01',
+    wa_mode: 'shared', businessType: 'dance',
+    whatsappUsage: { messagesUsed: 320, planLimit: 1000 },
   },
 ];
 

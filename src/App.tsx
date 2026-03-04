@@ -12,6 +12,8 @@ import Features from "./pages/public/Features";
 import Pricing from "./pages/public/Pricing";
 import Contact from "./pages/public/Contact";
 import Login from "./pages/Login";
+import Signup from "./pages/Signup";
+import Onboarding from "./pages/Onboarding";
 import ForgotPassword from "./pages/ForgotPassword";
 import VerifyCode from "./pages/VerifyCode";
 import ResetPassword from "./pages/ResetPassword";
@@ -51,6 +53,8 @@ const App = () => (
               <Route path="/contact" element={<Contact />} />
             </Route>
             <Route path="/login" element={<Login />} />
+            <Route path="/signup" element={<Signup />} />
+            <Route path="/onboarding" element={<Onboarding />} />
             <Route path="/forgot-password" element={<ForgotPassword />} />
             <Route path="/verify-code" element={<VerifyCode />} />
             <Route path="/reset-password" element={<ResetPassword />} />

@@ -87,10 +87,16 @@ const Login = () => {
                 <LogIn className="mr-2 h-4 w-4" /> Sign In
               </Button>
             </form>
-            <div className="mt-6 rounded-lg bg-muted p-3">
+            <p className="mt-4 text-center text-sm text-muted-foreground">
+              Don't have an account?{' '}
+              <Link to="/signup" className="text-primary hover:underline">Sign up</Link>
+            </p>
+            <div className="mt-4 rounded-lg bg-muted p-3">
               <p className="mb-1 text-xs font-medium text-muted-foreground">Demo Credentials</p>
               <p className="text-xs text-muted-foreground">Admin: admin@gymflow.com / admin123</p>
               <p className="text-xs text-muted-foreground">Gym Owner: owner@gymflow.com / owner123</p>
+              <p className="text-xs text-muted-foreground">Yoga Owner: yoga@gymflow.com / yoga123</p>
+              <p className="text-xs text-muted-foreground">Dance Owner: dance@gymflow.com / dance123</p>
             </div>
           </CardContent>
         </Card>

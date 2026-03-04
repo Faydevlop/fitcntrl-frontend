@@ -3,6 +3,8 @@ import StatsCard from '@/components/StatsCard';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Users, DollarSign, Clock, TrendingUp, MessageSquare, Send, Eye, HelpCircle, AlertTriangle, CalendarClock, IndianRupee, Phone, ArrowUpRight, CreditCard, XCircle, Wallet, LifeBuoy } from 'lucide-react';
+import { useAuth } from '@/contexts/AuthContext';
+import { getBusinessLabel } from '@/data/businessTypes';
 import { Button } from '@/components/ui/button';
 import { members, revenueData, membersJoinedData, payments, gyms, subscriptions } from '@/data/mockData';
 import { supportTickets } from '@/data/supportData';
@@ -12,6 +14,8 @@ import WhatsAppUsageDetailsModal from '@/components/WhatsAppUsageDetailsModal';
 
 const GymDashboard = () => {
   const [usageModalOpen, setUsageModalOpen] = useState(false);
+  const { user } = useAuth();
+  const labels = getBusinessLabel(user?.businessType || 'gym');
 
   // Current gym (gym owner logged in = gym id 1)
   const currentGym = gyms.find(g => g.id === '1')!;
@@ -101,7 +105,7 @@ const GymDashboard = () => {
       )}
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatsCard title="Total Members" value={totalMembers} icon={Users} variant="primary" />
+        <StatsCard title={`Total ${labels.entityLabelPlural}`} value={totalMembers} icon={Users} variant="primary" />
         <StatsCard title="This Month Collection" value={`₹${revenue.toLocaleString()}`} icon={DollarSign} variant="success" />
         <StatsCard title="Pending Amount" value={`₹${pendingAmount.toLocaleString()}`} icon={Wallet} variant="warning" />
         <StatsCard title="Expected Next Month" value={`₹${(revenue + pendingAmount).toLocaleString()}`} icon={TrendingUp} variant="primary" />
@@ -226,7 +230,7 @@ const GymDashboard = () => {
 
         <Card className="card-shadow border-0">
           <CardHeader>
-            <CardTitle className="text-lg">Members Joined Per Month</CardTitle>
+            <CardTitle className="text-lg">{labels.entityLabelPlural} Joined Per Month</CardTitle>
           </CardHeader>
           <CardContent>
             <ResponsiveContainer width="100%" height={250}>

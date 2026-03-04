@@ -15,6 +15,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Plus, Pencil, Trash2, CheckCircle, Search, Filter, Upload, Download, Send, UserCircle, Copy, MessageSquare } from 'lucide-react';
 import EmptyState from '@/components/EmptyState';
 import { members as initialMembers, payments, gyms, type Member, type MemberStatus } from '@/data/mockData';
+import { useAuth } from '@/contexts/AuthContext';
+import { getBusinessLabel } from '@/data/businessTypes';
 import { Users } from 'lucide-react';
 import { useTableControls } from '@/hooks/useTableControls';
 import { SortableHeader, TablePagination } from '@/components/TableControls';
@@ -27,6 +29,8 @@ const statusStyles: Record<MemberStatus, string> = {
 };
 
 const GymMembers = () => {
+  const { user } = useAuth();
+  const labels = getBusinessLabel(user?.businessType || 'gym');
   const [memberList, setMemberList] = useState<Member[]>(initialMembers);
   const [search, setSearch] = useState('');
   const [filterStatus, setFilterStatus] = useState<'all' | 'paid' | 'pending'>('all');
@@ -91,8 +95,8 @@ const GymMembers = () => {
     <div className="space-y-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-foreground">Members</h1>
-          <p className="text-sm text-muted-foreground">{memberList.length} total members</p>
+          <h1 className="text-2xl font-bold text-foreground">{labels.entityLabelPlural}</h1>
+          <p className="text-sm text-muted-foreground">{memberList.length} total {labels.entityLabelPlural.toLowerCase()}</p>
         </div>
         <div className="flex flex-wrap gap-2">
           <Dialog open={importOpen} onOpenChange={setImportOpen}>
@@ -124,12 +128,12 @@ const GymMembers = () => {
             </DialogTrigger>
             <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
               <DialogHeader>
-                <DialogTitle>Add New Member</DialogTitle>
+                <DialogTitle>Add New {labels.entityLabel}</DialogTitle>
               </DialogHeader>
               <div className="grid gap-4 py-4">
                 <div className="grid gap-2">
                   <Label>Name</Label>
-                  <Input placeholder="Member name" />
+                  <Input placeholder={`${labels.entityLabel} name`} />
                 </div>
                 <div className="grid gap-2">
                   <Label>Phone</Label>
@@ -148,7 +152,7 @@ const GymMembers = () => {
                     </Select>
                   </div>
                   <div className="grid gap-2">
-                    <Label>Fee Amount (₹)</Label>
+                    <Label>{labels.feeLabel} (₹)</Label>
                     <Input type="number" placeholder="1500" />
                   </div>
                 </div>
@@ -175,10 +179,19 @@ const GymMembers = () => {
                   </Select>
                 </div>
                 <div className="grid gap-2">
+                  <Label>{labels.categoryLabel}</Label>
+                  <Select>
+                    <SelectTrigger><SelectValue placeholder={`Select ${labels.categoryLabel.toLowerCase()}`} /></SelectTrigger>
+                    <SelectContent>
+                      {labels.categories.map(c => <SelectItem key={c} value={c.toLowerCase().replace(/\s+/g, '_')}>{c}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="grid gap-2">
                   <Label>Notes</Label>
                   <Textarea placeholder="Optional notes..." />
                 </div>
-                <Button className="mt-2" onClick={() => setAddOpen(false)}>Save Member</Button>
+                <Button className="mt-2" onClick={() => setAddOpen(false)}>Save {labels.entityLabel}</Button>
               </div>
             </DialogContent>
           </Dialog>
@@ -220,7 +233,7 @@ const GymMembers = () => {
       )}
 
       {preFiltered.length === 0 ? (
-        <EmptyState icon={Users} title="No members found" description="No members match your search or filter criteria." />
+        <EmptyState icon={Users} title={`No ${labels.entityLabelPlural.toLowerCase()} found`} description={`No ${labels.entityLabelPlural.toLowerCase()} match your search or filter criteria.`} />
       ) : (
         <Card className="card-shadow border-0">
           <CardContent className="p-0">

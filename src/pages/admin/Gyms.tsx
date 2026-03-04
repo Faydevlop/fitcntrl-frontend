@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Plus, Pencil, Eye, Ban, Snowflake, Play, AlertTriangle, RotateCcw, Pause, Phone, ArrowLeft } from 'lucide-react';
 import { gyms as initialGyms, plans, whatsappPhones, type Gym, type AccountStatus } from '@/data/mockData';
+import { BUSINESS_TYPE_OPTIONS, getBusinessTypeName, type BusinessType } from '@/data/businessTypes';
 import WhatsAppUsageBar from '@/components/WhatsAppUsageBar';
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { useTableControls } from '@/hooks/useTableControls';
@@ -29,6 +30,8 @@ const AdminGyms = () => {
   const [detailGym, setDetailGym] = useState<Gym | null>(null);
   const [selectedPlanId, setSelectedPlanId] = useState<string>('');
   const [selectedPhoneId, setSelectedPhoneId] = useState<string>('');
+  const [filterBusinessType, setFilterBusinessType] = useState<string>('all');
+  const [newBusinessType, setNewBusinessType] = useState<string>('');
 
   const availablePhones = whatsappPhones.filter(p => !p.assignedGymId);
   const selectedPlanName = plans.find(p => p.id === selectedPlanId)?.name || '';
@@ -231,8 +234,10 @@ const AdminGyms = () => {
     );
   }
 
+  const filteredGyms = filterBusinessType === 'all' ? gymList : gymList.filter(g => g.businessType === filterBusinessType);
+
   const gymTable = useTableControls({
-    data: gymList,
+    data: filteredGyms,
     searchFields: ['name', 'ownerName'],
     pageSize: 10,
   });
@@ -254,21 +259,30 @@ const AdminGyms = () => {
 
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-foreground">Gyms</h1>
-          <p className="text-sm text-muted-foreground">Manage all registered gyms</p>
+          <h1 className="text-2xl font-bold text-foreground">Businesses</h1>
+          <p className="text-sm text-muted-foreground">Manage all registered businesses</p>
         </div>
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
           <DialogTrigger asChild>
-            <Button><Plus className="mr-2 h-4 w-4" /> Add Gym</Button>
+            <Button><Plus className="mr-2 h-4 w-4" /> Add Business</Button>
           </DialogTrigger>
           <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
             <DialogHeader>
-              <DialogTitle>Add New Gym</DialogTitle>
+              <DialogTitle>Add New Business</DialogTitle>
             </DialogHeader>
             <div className="grid gap-4 py-4">
               <div className="grid gap-2">
-                <Label>Gym Name</Label>
-                <Input placeholder="Enter gym name" />
+                <Label>Business Type</Label>
+                <Select value={newBusinessType} onValueChange={setNewBusinessType}>
+                  <SelectTrigger><SelectValue placeholder="Select type" /></SelectTrigger>
+                  <SelectContent>
+                    {BUSINESS_TYPE_OPTIONS.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid gap-2">
+                <Label>Business Name</Label>
+                <Input placeholder="Enter business name" />
               </div>
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="grid gap-2">
@@ -334,14 +348,23 @@ const AdminGyms = () => {
                 <Label>Grace Period Days</Label>
                 <Input type="number" placeholder="0" min={0} />
               </div>
-              <Button className="mt-2" onClick={() => setDialogOpen(false)}>Save Gym</Button>
+              <Button className="mt-2" onClick={() => setDialogOpen(false)}>Save Business</Button>
             </div>
           </DialogContent>
         </Dialog>
       </div>
 
       <div className="flex items-center gap-3">
-        <TableSearchBar value={gymTable.search} onChange={gymTable.setSearch} placeholder="Search gyms..." />
+        <TableSearchBar value={gymTable.search} onChange={gymTable.setSearch} placeholder="Search businesses..." />
+        <Select value={filterBusinessType} onValueChange={setFilterBusinessType}>
+          <SelectTrigger className="w-44">
+            <SelectValue placeholder="All Types" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Types</SelectItem>
+            {BUSINESS_TYPE_OPTIONS.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
+          </SelectContent>
+        </Select>
       </div>
 
       <Card className="card-shadow border-0">
@@ -350,7 +373,8 @@ const AdminGyms = () => {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead><SortableHeader label="Gym Name" sortKey="name" currentSort={gymTable.sort} onSort={gymTable.toggleSort} /></TableHead>
+                  <TableHead><SortableHeader label="Name" sortKey="name" currentSort={gymTable.sort} onSort={gymTable.toggleSort} /></TableHead>
+                  <TableHead>Type</TableHead>
                   <TableHead><SortableHeader label="Owner" sortKey="ownerName" currentSort={gymTable.sort} onSort={gymTable.toggleSort} /></TableHead>
                   <TableHead>Plan</TableHead>
                   <TableHead>WA Mode</TableHead>
@@ -372,6 +396,9 @@ const AdminGyms = () => {
                             <Badge className="bg-primary/10 text-primary text-[10px] px-1.5">⚠ Frozen</Badge>
                           )}
                         </div>
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant="secondary" className="text-xs">{getBusinessTypeName(gym.businessType || 'gym')}</Badge>
                       </TableCell>
                       <TableCell>{gym.ownerName}</TableCell>
                       <TableCell>{plans.find(p => p.id === gym.planId)?.name}</TableCell>

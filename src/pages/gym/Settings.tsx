@@ -6,10 +6,13 @@ import { Switch } from '@/components/ui/switch';
 import { Button } from '@/components/ui/button';
 import { Save, Phone, CreditCard, Download, QrCode } from 'lucide-react';
 import { gyms } from '@/data/mockData';
+import { useAuth } from '@/contexts/AuthContext';
+import { getBusinessTypeName } from '@/data/businessTypes';
 import PasswordResetCard from '@/components/PasswordResetCard';
 
 const GymSettings = () => {
   const currentGym = gyms.find(g => g.id === '1')!;
+  const { user } = useAuth();
   const [upiId, setUpiId] = useState(currentGym.upiId || '');
   const [displayName, setDisplayName] = useState(currentGym.gymDisplayName || currentGym.name);
 
@@ -44,6 +47,10 @@ const GymSettings = () => {
               <Label>Days Before Due Reminder</Label>
               <Input type="number" defaultValue={3} min={0} />
             </div>
+          </div>
+          <div className="grid gap-2">
+            <Label>Business Type</Label>
+            <Input value={getBusinessTypeName(user?.businessType || currentGym.businessType || 'gym')} disabled />
           </div>
           <div className="grid gap-2">
             <Label>Currency</Label>

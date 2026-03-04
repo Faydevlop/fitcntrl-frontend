@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { NavLink, Outlet, Navigate, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
+import { getBusinessLabel } from '@/data/businessTypes';
 import { Button } from '@/components/ui/button';
 import {
   Dumbbell, LayoutDashboard, Building2, CreditCard, BarChart3, Settings, Users,
@@ -18,7 +19,7 @@ interface NavItem {
 
 const adminNav: NavItem[] = [
   { title: 'Dashboard', path: '/admin', icon: LayoutDashboard },
-  { title: 'Gyms', path: '/admin/gyms', icon: Building2 },
+  { title: 'Businesses', path: '/admin/gyms', icon: Building2 },
   { title: 'Plans & Pricing', path: '/admin/plans', icon: Tag },
   { title: 'Subscriptions', path: '/admin/subscriptions', icon: CreditCard },
   { title: 'Enquiries', path: '/admin/enquiries', icon: Inbox },
@@ -50,6 +51,7 @@ type SidebarState = 'full' | 'icons' | 'hidden';
 
 const DashboardLayout = () => {
   const { user, logout, isAuthenticated } = useAuth();
+  const ownerLabels = getBusinessLabel(user?.businessType || 'gym');
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarState, setSidebarState] = useState<SidebarState>('full');
   const [notifOpen, setNotifOpen] = useState(false);
@@ -100,7 +102,7 @@ const DashboardLayout = () => {
 
   if (!isAuthenticated || !user) return <Navigate to="/login" replace />;
 
-  const navItems = user.role === 'admin' ? adminNav : gymNav;
+  const navItems = user.role === 'admin' ? adminNav : gymNav.map(item => item.path === '/gym/members' ? { ...item, title: ownerLabels.entityLabelPlural } : item);
 
   const handleLogout = () => {
     logout();
