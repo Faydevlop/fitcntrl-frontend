@@ -1,34 +1,53 @@
 import { useState } from 'react';
 import { useNavigate, useLocation, Link } from 'react-router-dom';
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { z } from 'zod';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { InputOTP, InputOTPGroup, InputOTPSlot } from '@/components/ui/input-otp';
 import { Dumbbell, ArrowLeft, ShieldCheck } from 'lucide-react';
 import { toast } from '@/components/ui/sonner';
+import { authApi } from '@/services/api';
+import { ApiError } from '@/lib/api';
+
+const verifySchema = z.object({
+  code: z.string().length(6, 'Enter the full 6-digit code'),
+});
+
+type VerifyForm = z.infer<typeof verifySchema>;
 
 const VerifyCode = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const email = (location.state as any)?.email || '';
-  const [code, setCode] = useState('');
   const [loading, setLoading] = useState(false);
+  const { handleSubmit, setValue, watch, formState: { errors } } = useForm<VerifyForm>({
+    resolver: zodResolver(verifySchema),
+    defaultValues: { code: '' },
+  });
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (code.length < 6) {
-      toast.error('Please enter the full 6-digit code');
+  const code = watch('code');
+
+  const onSubmit = (values: VerifyForm) => {
+    navigate('/reset-password', { state: { email, code: values.code } });
+  };
+
+  const handleResend = async () => {
+    if (!email) {
+      toast.error('Email is missing. Go back and request a new code.');
       return;
     }
     setLoading(true);
-    setTimeout(() => {
+    try {
+      await authApi.forgotPassword({ email });
       setLoading(false);
-      toast.success('Code verified successfully');
-      navigate('/reset-password', { state: { email, code } });
-    }, 1000);
-  };
-
-  const handleResend = () => {
-    toast.success('New code sent to ' + email);
+      toast.success(`New code sent to ${email}`);
+    } catch (error) {
+      setLoading(false);
+      const message = error instanceof ApiError ? error.message : 'Failed to resend code';
+      toast.error(message);
+    }
   };
 
   return (
@@ -45,9 +64,13 @@ const VerifyCode = () => {
           </p>
         </CardHeader>
         <CardContent>
-          <form onSubmit={handleSubmit} className="space-y-6">
+          <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
             <div className="flex justify-center">
-              <InputOTP maxLength={6} value={code} onChange={setCode}>
+              <InputOTP
+                maxLength={6}
+                value={code}
+                onChange={value => setValue('code', value, { shouldValidate: true, shouldDirty: true })}
+              >
                 <InputOTPGroup>
                   <InputOTPSlot index={0} />
                   <InputOTPSlot index={1} />
@@ -58,14 +81,15 @@ const VerifyCode = () => {
                 </InputOTPGroup>
               </InputOTP>
             </div>
-            <Button type="submit" className="w-full" size="lg" disabled={loading}>
+            {errors.code && <p className="text-xs text-center text-destructive">{errors.code.message}</p>}
+            <Button type="submit" className="w-full" size="lg">
               <ShieldCheck className="mr-2 h-4 w-4" />
-              {loading ? 'Verifying...' : 'Verify Code'}
+              Verify Code
             </Button>
           </form>
           <div className="mt-4 text-center">
-            <button onClick={handleResend} className="text-sm text-primary hover:underline">
-              Didn't receive code? Resend
+            <button onClick={handleResend} className="text-sm text-primary hover:underline" disabled={loading}>
+              {loading ? 'Sending...' : "Didn't receive code? Resend"}
             </button>
           </div>
           <div className="mt-4 text-center">

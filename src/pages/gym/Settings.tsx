@@ -1,65 +1,153 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Button } from '@/components/ui/button';
-import { Save, Phone, CreditCard, Download, QrCode } from 'lucide-react';
-import { gyms } from '@/data/mockData';
+import { Save, CreditCard, QrCode } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { getBusinessTypeName } from '@/data/businessTypes';
 import PasswordResetCard from '@/components/PasswordResetCard';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { gymApi } from '@/services/api';
+import { toast } from '@/components/ui/sonner';
+import TablePageSkeleton from '@/components/loaders/TablePageSkeleton';
+
+const PHONE_REGEX = /^[+0-9][0-9\s-]{7,}$/;
 
 const GymSettings = () => {
-  const currentGym = gyms.find(g => g.id === '1')!;
-  const { user } = useAuth();
-  const [upiId, setUpiId] = useState(currentGym.upiId || '');
-  const [displayName, setDisplayName] = useState(currentGym.gymDisplayName || currentGym.name);
+  const queryClient = useQueryClient();
+  const { user, refreshProfile } = useAuth();
 
-  const upiLink = upiId ? `upi://pay?pa=${upiId}&pn=${encodeURIComponent(displayName)}` : '';
+  const [name, setName] = useState('');
+  const [ownerName, setOwnerName] = useState('');
+  const [phone, setPhone] = useState('');
+  const [upiId, setUpiId] = useState('');
+  const [displayName, setDisplayName] = useState('');
+  const [autoRenewal, setAutoRenewal] = useState(false);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [saveError, setSaveError] = useState('');
+
+  const { data, isLoading } = useQuery({
+    queryKey: ['gym-billing-summary'],
+    queryFn: () => gymApi.billingSummary(),
+  });
+
+  const gym = data?.gym;
+
+  useEffect(() => {
+    setName(String(gym?.name || ''));
+    setOwnerName(String(gym?.ownerName || user?.name || ''));
+    setPhone(String(gym?.phone || user?.phone || ''));
+    setUpiId(String(gym?.upiId || ''));
+    setDisplayName(String(gym?.gymDisplayName || gym?.name || ''));
+    setAutoRenewal(Boolean(gym?.subscription?.autoRenewal));
+  }, [
+    gym?.name,
+    gym?.ownerName,
+    gym?.phone,
+    gym?.upiId,
+    gym?.gymDisplayName,
+    gym?.subscription?.autoRenewal,
+    user?.name,
+    user?.phone,
+  ]);
+
+  const updateSettingsMutation = useMutation({
+    mutationFn: () =>
+      gymApi.updateSettings({
+        name: name.trim(),
+        ownerName: ownerName.trim(),
+        phone: phone.trim(),
+        upiId: upiId.trim() || undefined,
+        gymDisplayName: displayName.trim() || undefined,
+        autoRenewal,
+      }),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['gym-billing-summary'] }),
+        queryClient.invalidateQueries({ queryKey: ['gym-billing-lite'] }),
+        queryClient.invalidateQueries({ queryKey: ['gym-billing-lite-support'] }),
+        queryClient.invalidateQueries({ queryKey: ['gym-dashboard-live'] }),
+      ]);
+      await refreshProfile();
+      setSaveError('');
+      toast.success('Settings saved');
+    },
+    onError: (error: unknown) => {
+      const message = error instanceof Error ? error.message : 'Unable to save settings';
+      setSaveError(message);
+      toast.error(message);
+    },
+  });
+
+  const upiLink = useMemo(
+    () => (upiId.trim() ? `upi://pay?pa=${upiId.trim()}&pn=${encodeURIComponent(displayName.trim() || name.trim() || 'Business')}` : ''),
+    [upiId, displayName, name],
+  );
+
+  const handleSave = () => {
+    const errors: Record<string, string> = {};
+    if (!name.trim()) errors.name = 'Business name is required';
+    if (!ownerName.trim()) errors.ownerName = 'Owner name is required';
+    if (!phone.trim()) {
+      errors.phone = 'Phone is required';
+    } else if (!PHONE_REGEX.test(phone.trim())) {
+      errors.phone = 'Enter a valid phone number';
+    }
+    if (upiId.trim() && upiId.trim().length < 3) {
+      errors.upiId = 'Enter a valid UPI ID';
+    }
+
+    setFieldErrors(errors);
+    if (Object.keys(errors).length > 0) return;
+
+    setSaveError('');
+    updateSettingsMutation.mutate();
+  };
+
+  if (isLoading && !data) {
+    return <TablePageSkeleton columns={2} rows={6} />;
+  }
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-foreground">Settings</h1>
-        <p className="text-sm text-muted-foreground">Configure your gym preferences</p>
+        <p className="text-sm text-muted-foreground">Configure your business preferences</p>
       </div>
 
       <Card className="card-shadow border-0 max-w-2xl">
         <CardHeader>
-          <CardTitle>Gym Details</CardTitle>
+          <CardTitle>Business Details</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid gap-2">
-            <Label>Gym Name</Label>
-            <Input defaultValue="FitZone Gym" />
+            <Label>Business Name</Label>
+            <Input value={name} onChange={e => setName(e.target.value)} />
+            {fieldErrors.name && <p className="text-xs text-destructive">{fieldErrors.name}</p>}
+          </div>
+          <div className="grid gap-2">
+            <Label>Owner Name</Label>
+            <Input value={ownerName} onChange={e => setOwnerName(e.target.value)} />
+            {fieldErrors.ownerName && <p className="text-xs text-destructive">{fieldErrors.ownerName}</p>}
           </div>
           <div className="grid gap-2">
             <Label>Owner Phone</Label>
-            <Input defaultValue="+91 98765 43210" />
-          </div>
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div className="grid gap-2">
-              <Label>Reminder Day of Month (1-31)</Label>
-              <Input type="number" defaultValue={1} min={1} max={31} />
-            </div>
-            <div className="grid gap-2">
-              <Label>Days Before Due Reminder</Label>
-              <Input type="number" defaultValue={3} min={0} />
-            </div>
+            <Input value={phone} onChange={e => setPhone(e.target.value)} />
+            {fieldErrors.phone && <p className="text-xs text-destructive">{fieldErrors.phone}</p>}
           </div>
           <div className="grid gap-2">
             <Label>Business Type</Label>
-            <Input value={getBusinessTypeName(user?.businessType || currentGym.businessType || 'gym')} disabled />
+            <Input value={getBusinessTypeName(user?.platformType || user?.businessType || gym?.platformType || 'gym')} disabled />
           </div>
           <div className="grid gap-2">
             <Label>Currency</Label>
-            <Input defaultValue="INR" disabled />
+            <Input value="INR" disabled />
           </div>
         </CardContent>
       </Card>
 
-      {/* Payment Settings */}
       <Card className="card-shadow border-0 max-w-2xl">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
@@ -70,27 +158,19 @@ const GymSettings = () => {
           <div className="grid gap-2">
             <Label>UPI ID</Label>
             <Input placeholder="yourname@upi" value={upiId} onChange={e => setUpiId(e.target.value)} />
+            {fieldErrors.upiId && <p className="text-xs text-destructive">{fieldErrors.upiId}</p>}
           </div>
           <div className="grid gap-2">
-            <Label>Gym Display Name (for QR)</Label>
-            <Input placeholder="Your Gym Name" value={displayName} onChange={e => setDisplayName(e.target.value)} />
+            <Label>Display Name (for payment links)</Label>
+            <Input placeholder="Your Business Name" value={displayName} onChange={e => setDisplayName(e.target.value)} />
           </div>
-          {upiId && (
+          {upiId.trim() && (
             <div className="rounded-lg border border-border p-4 space-y-3">
               <div className="flex items-center gap-2">
                 <QrCode className="h-5 w-5 text-primary" />
-                <p className="text-sm font-medium text-foreground">QR Code Preview</p>
-              </div>
-              <div className="flex h-40 w-40 items-center justify-center rounded-lg bg-muted/50 border border-border">
-                <div className="text-center">
-                  <QrCode className="h-16 w-16 text-muted-foreground mx-auto" />
-                  <p className="text-[10px] text-muted-foreground mt-1">QR for {upiId}</p>
-                </div>
+                <p className="text-sm font-medium text-foreground">UPI Link Preview</p>
               </div>
               <p className="text-xs text-muted-foreground font-mono break-all">{upiLink}</p>
-              <Button variant="outline" size="sm">
-                <Download className="mr-2 h-3 w-3" /> Download QR
-              </Button>
             </div>
           )}
         </CardContent>
@@ -98,62 +178,25 @@ const GymSettings = () => {
 
       <Card className="card-shadow border-0 max-w-2xl">
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Phone className="h-5 w-5 text-success" /> WhatsApp Settings
-          </CardTitle>
+          <CardTitle>Subscription Preferences</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex items-center justify-between">
+        <CardContent>
+          <div className="flex items-center justify-between rounded-lg border border-border p-4">
             <div>
-              <Label>Enable Reminders</Label>
-              <p className="text-xs text-muted-foreground">Send WhatsApp reminders to members</p>
+              <Label>Auto Renewal</Label>
+              <p className="text-xs text-muted-foreground">Automatically renew your subscription at the end of each cycle</p>
             </div>
-            <Switch defaultChecked />
-          </div>
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div className="grid gap-2">
-              <Label>Max Reminders per Day</Label>
-              <Input type="number" defaultValue={50} min={1} />
-            </div>
-          </div>
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div className="grid gap-2">
-              <Label>Quiet Hours Start</Label>
-              <Input type="time" defaultValue="21:00" />
-            </div>
-            <div className="grid gap-2">
-              <Label>Quiet Hours End</Label>
-              <Input type="time" defaultValue="08:00" />
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card className="card-shadow border-0 max-w-2xl">
-        <CardHeader>
-          <CardTitle>Automation</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <Label>Auto Reminder</Label>
-              <p className="text-xs text-muted-foreground">Send WhatsApp reminders automatically before due date</p>
-            </div>
-            <Switch defaultChecked />
-          </div>
-          <div className="flex items-center justify-between">
-            <div>
-              <Label>Daily Summary</Label>
-              <p className="text-xs text-muted-foreground">Receive a daily collection summary via WhatsApp</p>
-            </div>
-            <Switch />
+            <Switch checked={autoRenewal} onCheckedChange={setAutoRenewal} />
           </div>
         </CardContent>
       </Card>
 
       <PasswordResetCard />
 
-      <Button><Save className="mr-2 h-4 w-4" /> Save Changes</Button>
+      {saveError && <p className="text-sm text-destructive">{saveError}</p>}
+      <Button onClick={handleSave} disabled={updateSettingsMutation.isPending}>
+        <Save className="mr-2 h-4 w-4" /> {updateSettingsMutation.isPending ? 'Saving...' : 'Save Changes'}
+      </Button>
     </div>
   );
 };

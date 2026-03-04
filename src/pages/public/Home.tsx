@@ -39,7 +39,7 @@ const Home = () => (
           <br />members and your gym
         </h1>
         <p className="mx-auto mt-6 max-w-2xl text-lg text-primary-foreground/70">
-          GymFlow helps gym owners work faster, smarter and more efficiently, delivering visibility and data-driven insights to grow their business.
+          fitcntrl helps gym owners work faster, smarter and more efficiently, delivering visibility and data-driven insights to grow their business.
         </p>
         <div className="mt-10 flex flex-wrap justify-center gap-4">
           <Button size="lg" className="bg-primary-foreground text-primary hover:bg-primary-foreground/90" asChild>
@@ -56,7 +56,7 @@ const Home = () => (
     <section className="border-b border-border py-10">
       <div className="mx-auto max-w-7xl px-4 lg:px-8">
         <p className="mb-6 text-center text-sm font-medium text-muted-foreground">
-          More than 500+ gyms trust GymFlow
+          More than 500+ gyms trust fitcntrl
         </p>
         <div className="flex flex-wrap items-center justify-center gap-8 opacity-50 lg:gap-16">
           {['FitZone', 'Iron Paradise', 'PowerHouse', 'FlexFit', 'Peak Performance'].map(name => (
@@ -172,7 +172,7 @@ const Home = () => (
           <Quote className="h-6 w-6 text-primary" />
         </div>
         <blockquote className="mt-8 text-xl font-medium leading-relaxed text-foreground lg:text-2xl">
-          "GymFlow is helping our gym to decrease operational expenses and turnaround time, while increasing the efficiency of member management and payment collection."
+          "fitcntrl is helping our gym to decrease operational expenses and turnaround time, while increasing the efficiency of member management and payment collection."
         </blockquote>
         <div className="mt-8 flex items-center justify-center gap-3">
           <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary text-sm font-bold text-primary-foreground">RS</div>
@@ -203,7 +203,7 @@ const Home = () => (
       <div className="mx-auto max-w-7xl px-4 lg:px-8">
         <div className="overflow-hidden rounded-2xl bg-primary px-8 py-14 text-center lg:px-16">
           <h2 className="text-3xl font-bold text-primary-foreground lg:text-4xl">
-            Discover the full scale of<br /><span className="underline decoration-primary-foreground/40 underline-offset-4">GymFlow</span> capabilities
+            Discover the full scale of<br /><span className="underline decoration-primary-foreground/40 underline-offset-4">fitcntrl</span> capabilities
           </h2>
           <div className="mt-8 flex flex-wrap justify-center gap-4">
             <Button size="lg" variant="outline" className="border-primary-foreground/30 bg-transparent text-primary-foreground hover:bg-primary-foreground/10" asChild>

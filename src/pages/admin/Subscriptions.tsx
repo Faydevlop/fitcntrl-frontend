@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
@@ -8,9 +8,12 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { RefreshCw, CheckCircle, Eye, XCircle, CalendarPlus, Snowflake, ArrowLeft } from 'lucide-react';
-import { subscriptions as initialSubscriptions, subscriptionPayments, type Subscription, type SubscriptionStatus } from '@/data/mockData';
-import { useTableControls } from '@/hooks/useTableControls';
+import { type Subscription, type SubscriptionStatus } from '@/data/mockData';
 import { TableSearchBar, SortableHeader, TablePagination } from '@/components/TableControls';
+import { useServerTableControls } from '@/hooks/useServerTableControls';
+import { useQuery } from '@tanstack/react-query';
+import { adminApi } from '@/services/api';
+import TablePageSkeleton from '@/components/loaders/TablePageSkeleton';
 
 const statusStyles: Record<string, string> = {
   paid: 'bg-success/10 text-success hover:bg-success/20',
@@ -31,17 +34,58 @@ const paymentStatusStyles: Record<string, string> = {
   pending: 'bg-warning/10 text-warning hover:bg-warning/20',
 };
 
+const formatDate = (value: unknown) => {
+  if (!value) return '-';
+  const date = new Date(String(value));
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toISOString().split('T')[0];
+};
+
+const mapSubscription = (row: any): Subscription => ({
+  id: String(row?._id || row?.id || ''),
+  gymId: row?.gymId ? String(row.gymId) : '',
+  gymName: String(row?.gymName || '-'),
+  planName: String(row?.planName || '-'),
+  startDate: formatDate(row?.startDate),
+  expiryDate: formatDate(row?.expiryDate),
+  paymentStatus: row?.paymentStatus === 'paid' ? 'paid' : row?.paymentStatus === 'overdue' ? 'overdue' : 'pending',
+  amountPaid: Number(row?.amountPaid || 0),
+  subscriptionStatus:
+    row?.status === 'past_due'
+      ? 'past_due'
+      : row?.status === 'cancelled'
+        ? 'cancelled'
+        : row?.status === 'trialing'
+          ? 'trialing'
+          : 'active',
+  nextBillingDate: formatDate(row?.nextBillingDate),
+  lastPaymentDate: formatDate(row?.lastPaymentDate),
+  autoRenewal: row?.autoRenewal !== false,
+  razorpaySubscriptionId: row?.providerSubscriptionId ? String(row.providerSubscriptionId) : undefined,
+});
+
 const AdminSubscriptions = () => {
-  const [subList, setSubList] = useState<Subscription[]>(initialSubscriptions);
   const [payOpen, setPayOpen] = useState(false);
   const [selectedSub, setSelectedSub] = useState<Subscription | null>(null);
   const [detailSub, setDetailSub] = useState<Subscription | null>(null);
 
-  const table = useTableControls({
-    data: subList,
+  const table = useServerTableControls({
     searchFields: ['gymName', 'planName'],
     pageSize: 10,
+    sortKeyMap: {
+      subscriptionStatus: 'status',
+      amountPaid: 'createdAt',
+    },
   });
+
+  const { data, isLoading } = useQuery({
+    queryKey: ['admin-subscriptions', table.search, table.sort, table.page],
+    queryFn: () => adminApi.listSubscriptions(table.toPayload()),
+  });
+
+  const subList = useMemo(() => (data?.tableData || []).map(mapSubscription), [data]);
+  const totalCount = data?.totalCount || 0;
+  const totalPages = Math.max(1, Math.ceil(totalCount / table.pageSize));
 
   const handleMarkPaid = (sub: Subscription) => {
     setSelectedSub(sub);
@@ -49,13 +93,40 @@ const AdminSubscriptions = () => {
   };
 
   const confirmPayment = () => {
-    if (!selectedSub) return;
-    setSubList(prev => prev.map(s => s.id === selectedSub.id ? { ...s, paymentStatus: 'paid' as const, subscriptionStatus: 'active' as const } : s));
     setPayOpen(false);
     setSelectedSub(null);
   };
 
-  const detailPayments = detailSub ? subscriptionPayments.filter(p => p.subscriptionId === detailSub.id) : [];
+  const { data: detailPaymentsResponse, isLoading: detailPaymentsLoading } = useQuery({
+    queryKey: ['admin-subscription-payments', detailSub?.id],
+    enabled: Boolean(detailSub?.id),
+    queryFn: () =>
+      adminApi.listSubscriptionPayments({
+        filters: { subscriptionId: detailSub!.id },
+        options: { page: 1, itemsPerPage: 100, sortBy: ['paidAt'], sortDesc: [true] },
+      }),
+  });
+
+  const detailPayments = useMemo(
+    () =>
+      (detailPaymentsResponse?.tableData || []).map((row: any) => ({
+        id: String(row?._id || ''),
+        date: formatDate(row?.paidAt || row?.createdAt),
+        amount: Number(row?.amount || 0),
+        status:
+          row?.status === 'failed'
+            ? 'failed'
+            : row?.status === 'pending'
+              ? 'pending'
+              : 'success',
+        razorpayPaymentId: row?.providerPaymentId ? String(row.providerPaymentId) : '',
+      })),
+    [detailPaymentsResponse],
+  );
+
+  if (isLoading && !data) {
+    return <TablePageSkeleton columns={8} />;
+  }
 
   if (detailSub) {
     return (
@@ -100,7 +171,9 @@ const AdminSubscriptions = () => {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {detailPayments.length === 0 ? (
+                  {detailPaymentsLoading ? (
+                    <TableRow><TableCell colSpan={4} className="text-center text-muted-foreground">Loading payment records...</TableCell></TableRow>
+                  ) : detailPayments.length === 0 ? (
                     <TableRow><TableCell colSpan={4} className="text-center text-muted-foreground">No payment records</TableCell></TableRow>
                   ) : (
                     detailPayments.map(p => (
@@ -159,7 +232,14 @@ const AdminSubscriptions = () => {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {table.paginatedData.map(sub => (
+                {isLoading && (
+                  <TableRow>
+                    <TableCell colSpan={8} className="text-center text-muted-foreground py-8">
+                      Loading subscriptions...
+                    </TableCell>
+                  </TableRow>
+                )}
+                {!isLoading && subList.map(sub => (
                   <TableRow key={sub.id}>
                     <TableCell className="font-medium">{sub.gymName}</TableCell>
                     <TableCell>{sub.planName}</TableCell>
@@ -180,7 +260,7 @@ const AdminSubscriptions = () => {
               </TableBody>
             </Table>
           </div>
-          <TablePagination page={table.page} totalPages={table.totalPages} totalItems={table.totalFiltered} onPageChange={table.setPage} />
+          <TablePagination page={table.page} totalPages={totalPages} totalItems={totalCount} onPageChange={table.setPage} />
         </CardContent>
       </Card>
 

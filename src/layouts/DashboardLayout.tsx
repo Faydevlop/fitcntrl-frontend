@@ -10,6 +10,8 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { Skeleton } from '@/components/ui/skeleton';
+import { useAppSelector } from '@/store/hooks';
 
 interface NavItem {
   title: string;
@@ -50,8 +52,10 @@ const mockNotifications = [
 type SidebarState = 'full' | 'icons' | 'hidden';
 
 const DashboardLayout = () => {
-  const { user, logout, isAuthenticated } = useAuth();
-  const ownerLabels = getBusinessLabel(user?.businessType || 'gym');
+  const { user, logout, isAuthenticated, isInitializing } = useAuth();
+  const profile = useAppSelector(state => state.app.profile);
+  const activeUser = user || profile;
+  const ownerLabels = getBusinessLabel(activeUser?.platformType || activeUser?.businessType || 'gym');
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarState, setSidebarState] = useState<SidebarState>('full');
   const [notifOpen, setNotifOpen] = useState(false);
@@ -100,9 +104,31 @@ const DashboardLayout = () => {
     return () => document.removeEventListener('mousedown', handler);
   }, [notifOpen]);
 
-  if (!isAuthenticated || !user) return <Navigate to="/login" replace />;
+  if (isInitializing) {
+    return (
+      <div className="flex h-screen bg-background">
+        <div className="hidden w-64 border-r border-border bg-card p-4 lg:block">
+          <Skeleton className="h-8 w-40" />
+          <div className="mt-6 space-y-3">
+            {Array.from({ length: 8 }).map((_, index) => (
+              <Skeleton key={`side-${index}`} className="h-10 w-full" />
+            ))}
+          </div>
+        </div>
+        <div className="flex-1 p-6">
+          <Skeleton className="h-10 w-full" />
+          <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {Array.from({ length: 6 }).map((_, index) => (
+              <Skeleton key={`card-${index}`} className="h-32 w-full" />
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
+  if (!isAuthenticated || !activeUser) return <Navigate to="/login" replace />;
 
-  const navItems = user.role === 'admin' ? adminNav : gymNav.map(item => item.path === '/gym/members' ? { ...item, title: ownerLabels.entityLabelPlural } : item);
+  const navItems = activeUser.role === 'admin' ? adminNav : gymNav.map(item => item.path === '/gym/members' ? { ...item, title: ownerLabels.entityLabelPlural } : item);
 
   const handleLogout = () => {
     logout();
@@ -130,7 +156,7 @@ const DashboardLayout = () => {
           <div className={`flex h-16 items-center border-b border-border ${sidebarState === 'icons' && !sidebarOpen ? 'justify-center px-2' : 'gap-3 px-6'}`}>
             <Dumbbell className="h-7 w-7 text-primary flex-shrink-0" />
             {(sidebarState === 'full' || sidebarOpen) && (
-              <span className="text-xl font-bold text-foreground whitespace-nowrap">GymFlow</span>
+              <span className="text-xl font-bold text-foreground whitespace-nowrap">fitcntrl</span>
             )}
             <button className="ml-auto lg:hidden" onClick={() => setSidebarOpen(false)}>
               <X className="h-5 w-5 text-muted-foreground" />
@@ -214,7 +240,7 @@ const DashboardLayout = () => {
               </Tooltip>
               <div className="hidden lg:block">
                 <p className="text-sm text-muted-foreground">
-                  {user.role === 'admin' ? 'Platform Admin' : 'Gym Owner'}
+                  {activeUser.role === 'admin' ? 'Platform Admin' : 'Gym Owner'}
                 </p>
               </div>
             </div>
@@ -287,9 +313,9 @@ const DashboardLayout = () => {
 
               <div className="flex items-center gap-2">
                 <div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary text-sm font-medium text-primary-foreground">
-                  {user.name.charAt(0)}
+                  {activeUser.name.charAt(0)}
                 </div>
-                <span className="hidden text-sm font-medium text-foreground sm:inline">{user.name}</span>
+                <span className="hidden text-sm font-medium text-foreground sm:inline">{activeUser.name}</span>
               </div>
             </div>
           </header>

@@ -1,6 +1,19 @@
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import type { WhatsAppUsageData } from '@/data/mockData';
+
+export interface WhatsAppUsageData {
+  messagesUsed: number;
+  planLimit: number;
+  messagesFailed?: number;
+  deliveryRate?: number;
+  conversationsThisMonth?: number;
+  dailySafeLimit?: number;
+  dailyData?: Array<{
+    date: string;
+    messagesSent: number;
+    conversations: number;
+  }>;
+}
 
 interface Props {
   open: boolean;

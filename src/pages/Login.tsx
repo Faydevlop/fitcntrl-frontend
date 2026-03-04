@@ -1,36 +1,58 @@
 import { useState } from 'react';
 import { Navigate, Link } from 'react-router-dom';
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { z } from 'zod';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Dumbbell, LogIn } from 'lucide-react';
+import AuthPageSkeleton from '@/components/loaders/AuthPageSkeleton';
+
+const loginSchema = z.object({
+  email: z.string().email('Enter a valid email'),
+  password: z.string().min(1, 'Password is required'),
+});
+
+type LoginForm = z.infer<typeof loginSchema>;
 
 const Login = () => {
-  const { login, isAuthenticated, user } = useAuth();
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+  const { login, isAuthenticated, user, isInitializing } = useAuth();
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+  const { register, handleSubmit, formState: { errors } } = useForm<LoginForm>({
+    resolver: zodResolver(loginSchema),
+    defaultValues: { email: '', password: '' },
+  });
 
-  if (isAuthenticated && user) {
-    return <Navigate to={user.role === 'admin' ? '/admin' : '/gym'} replace />;
+  if (isInitializing) {
+    return <AuthPageSkeleton />;
   }
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
+  if (isAuthenticated && user) {
+    if (user.role === 'admin') return <Navigate to="/admin" replace />;
+    if (!user.onboardingComplete) return <Navigate to="/onboarding" replace />;
+    return <Navigate to="/gym" replace />;
+  }
+
+  const onSubmit = async (values: LoginForm) => {
     setError('');
-    const success = login(email, password);
-    if (!success) setError('Invalid email or password');
+    setLoading(true);
+    const result = await login(values.email, values.password);
+    setLoading(false);
+    if (!result.success) {
+      setError(result.message || 'Invalid email or password');
+    }
   };
 
   return (
     <div className="flex min-h-screen">
-      {/* Left - Branding */}
       <div className="hidden flex-1 flex-col justify-between bg-primary p-12 lg:flex">
         <div className="flex items-center gap-3">
           <Dumbbell className="h-8 w-8 text-primary-foreground" />
-          <span className="text-2xl font-bold text-primary-foreground">GymFlow</span>
+          <span className="text-2xl font-bold text-primary-foreground">fitcntrl</span>
         </div>
         <div>
           <h1 className="text-4xl font-bold leading-tight text-primary-foreground">
@@ -40,10 +62,9 @@ const Login = () => {
             All-in-one platform for gym management, member tracking, payments, and WhatsApp automation.
           </p>
         </div>
-        <p className="text-sm text-primary-foreground/50">© 2025 GymFlow. All rights reserved.</p>
+        <p className="text-sm text-primary-foreground/50">© 2025 fitcntrl. All rights reserved.</p>
       </div>
 
-      {/* Right - Login Form */}
       <div className="flex flex-1 items-center justify-center bg-background p-8">
         <Card className="w-full max-w-md border-0 card-shadow">
           <CardHeader className="space-y-1 pb-4 text-center">
@@ -51,31 +72,19 @@ const Login = () => {
               <Dumbbell className="h-7 w-7 text-primary" />
             </div>
             <h2 className="text-2xl font-bold text-foreground">Welcome back</h2>
-            <p className="text-sm text-muted-foreground">Sign in to your GymFlow account</p>
+            <p className="text-sm text-muted-foreground">Sign in to your fitcntrl account</p>
           </CardHeader>
           <CardContent>
-            <form onSubmit={handleSubmit} className="space-y-4">
+            <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
               <div className="space-y-2">
                 <Label htmlFor="email">Email</Label>
-                <Input
-                  id="email"
-                  type="email"
-                  placeholder="admin@gymflow.com"
-                  value={email}
-                  onChange={e => setEmail(e.target.value)}
-                  required
-                />
+                <Input id="email" type="email" placeholder="admin@fitcntrl.com" {...register('email')} />
+                {errors.email && <p className="text-xs text-destructive">{errors.email.message}</p>}
               </div>
               <div className="space-y-2">
                 <Label htmlFor="password">Password</Label>
-                <Input
-                  id="password"
-                  type="password"
-                  placeholder="••••••••"
-                  value={password}
-                  onChange={e => setPassword(e.target.value)}
-                  required
-                />
+                <Input id="password" type="password" placeholder="••••••••" {...register('password')} />
+                {errors.password && <p className="text-xs text-destructive">{errors.password.message}</p>}
               </div>
               {error && <p className="text-sm text-destructive">{error}</p>}
               <div className="flex justify-end">
@@ -83,21 +92,13 @@ const Login = () => {
                   Forgot Password?
                 </Link>
               </div>
-              <Button type="submit" className="w-full" size="lg">
-                <LogIn className="mr-2 h-4 w-4" /> Sign In
+              <Button type="submit" className="w-full" size="lg" disabled={loading}>
+                <LogIn className="mr-2 h-4 w-4" /> {loading ? 'Signing in...' : 'Sign In'}
               </Button>
             </form>
             <p className="mt-4 text-center text-sm text-muted-foreground">
-              Don't have an account?{' '}
-              <Link to="/signup" className="text-primary hover:underline">Sign up</Link>
+              Don't have an account? <Link to="/signup" className="text-primary hover:underline">Sign up</Link>
             </p>
-            <div className="mt-4 rounded-lg bg-muted p-3">
-              <p className="mb-1 text-xs font-medium text-muted-foreground">Demo Credentials</p>
-              <p className="text-xs text-muted-foreground">Admin: admin@gymflow.com / admin123</p>
-              <p className="text-xs text-muted-foreground">Gym Owner: owner@gymflow.com / owner123</p>
-              <p className="text-xs text-muted-foreground">Yoga Owner: yoga@gymflow.com / yoga123</p>
-              <p className="text-xs text-muted-foreground">Dance Owner: dance@gymflow.com / dance123</p>
-            </div>
           </CardContent>
         </Card>
       </div>

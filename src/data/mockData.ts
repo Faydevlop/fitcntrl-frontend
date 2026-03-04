@@ -350,6 +350,8 @@ export interface WhatsAppPhone {
   wabaId: string;
   token: string;
   assignedGymId: string | null;
+  setForBasic?: boolean;
+  isActive?: boolean;
 }
 
 export const whatsappPhones: WhatsAppPhone[] = [

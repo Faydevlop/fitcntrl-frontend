@@ -8,13 +8,14 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Dumbbell, Flower2, PersonStanding, Music, Target, Building2, ArrowRight, ArrowLeft, CheckCircle } from 'lucide-react';
 import { type BusinessType, BUSINESS_TYPE_OPTIONS } from '@/data/businessTypes';
+import { useAppSelector } from '@/store/hooks';
 
 const iconMap: Record<string, React.ElementType> = {
   Dumbbell, Flower2, PersonStanding, Music, Target, Building2,
 };
 
 const Onboarding = () => {
-  const { isAuthenticated, user, completeOnboarding } = useAuth();
+  const { isAuthenticated, user, completeOnboarding, isInitializing } = useAuth();
   const navigate = useNavigate();
   const [step, setStep] = useState(1);
   const [businessType, setBusinessType] = useState<BusinessType | ''>('');
@@ -25,15 +26,50 @@ const Onboarding = () => {
   const [address, setAddress] = useState('');
   const [upiId, setUpiId] = useState('');
   const [displayName, setDisplayName] = useState('');
+  const [submitError, setSubmitError] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
+  const constantsData = useAppSelector(state => state.app.constants);
+  const constantsLoading = useAppSelector(state => state.app.constantsStatus === 'loading');
+
+  const allowedTypes = Array.isArray(constantsData?.platformTypes)
+    ? constantsData.platformTypes
+    : BUSINESS_TYPE_OPTIONS.map(opt => opt.value);
+  const platformOptions = BUSINESS_TYPE_OPTIONS.filter(opt => allowedTypes.includes(opt.value));
+
+  if (isInitializing) return null;
   if (!isAuthenticated || !user) return <Navigate to="/login" replace />;
   if (user.onboardingComplete) return <Navigate to="/gym" replace />;
 
-  const handleFinish = () => {
-    if (businessType) {
-      completeOnboarding(businessType as BusinessType, businessName);
-      navigate('/gym');
+  const handleFinish = async () => {
+    if (!businessType) return;
+    const errors: Record<string, string> = {};
+    if (!businessName.trim()) errors.businessName = 'Business name is required';
+    if (!ownerName.trim()) errors.ownerName = 'Owner name is required';
+    if (!phone.trim()) errors.phone = 'Phone is required';
+    if (Object.keys(errors).length > 0) {
+      setFieldErrors(errors);
+      return;
     }
+
+    setFieldErrors({});
+    setSubmitError('');
+    setSubmitting(true);
+    const result = await completeOnboarding(businessType as BusinessType, businessName, {
+      ownerName,
+      phone,
+      city,
+      address,
+      upiId,
+      displayName,
+    });
+    setSubmitting(false);
+    if (result.success) {
+      navigate('/gym');
+      return;
+    }
+    setSubmitError(result.message || 'Failed to complete onboarding');
   };
 
   return (
@@ -68,7 +104,15 @@ const Onboarding = () => {
                 <p className="text-sm text-muted-foreground mt-1">This helps us customize your dashboard</p>
               </div>
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                {BUSINESS_TYPE_OPTIONS.map(opt => {
+                {constantsLoading && Array.from({ length: 6 }).map((_, index) => (
+                  <Card key={`platform-skeleton-${index}`} className="border-border">
+                    <CardContent className="flex flex-col items-center gap-3 p-6">
+                      <div className="h-10 w-10 rounded-full bg-muted animate-pulse" />
+                      <div className="h-4 w-20 rounded bg-muted animate-pulse" />
+                    </CardContent>
+                  </Card>
+                ))}
+                {!constantsLoading && platformOptions.map(opt => {
                   const Icon = iconMap[opt.icon] || Building2;
                   return (
                     <Card
@@ -84,8 +128,16 @@ const Onboarding = () => {
                   );
                 })}
               </div>
+              {fieldErrors.businessType && <p className="text-xs text-destructive">{fieldErrors.businessType}</p>}
               <div className="flex justify-end">
-                <Button onClick={() => setStep(2)} disabled={!businessType}>
+                <Button onClick={() => {
+                  if (!businessType) {
+                    setFieldErrors(prev => ({ ...prev, businessType: 'Please select business type' }));
+                    return;
+                  }
+                  setFieldErrors(prev => ({ ...prev, businessType: '' }));
+                  setStep(2);
+                }} disabled={!businessType}>
                   Next <ArrowRight className="ml-2 h-4 w-4" />
                 </Button>
               </div>
@@ -104,15 +156,18 @@ const Onboarding = () => {
                   <div className="grid gap-2">
                     <Label>Business Name</Label>
                     <Input placeholder="Your business name" value={businessName} onChange={e => setBusinessName(e.target.value)} />
+                    {fieldErrors.businessName && <p className="text-xs text-destructive">{fieldErrors.businessName}</p>}
                   </div>
                   <div className="grid gap-4 sm:grid-cols-2">
                     <div className="grid gap-2">
                       <Label>Owner Name</Label>
                       <Input value={ownerName} onChange={e => setOwnerName(e.target.value)} />
+                      {fieldErrors.ownerName && <p className="text-xs text-destructive">{fieldErrors.ownerName}</p>}
                     </div>
                     <div className="grid gap-2">
                       <Label>Phone</Label>
                       <Input placeholder="+91 XXXXX XXXXX" value={phone} onChange={e => setPhone(e.target.value)} />
+                      {fieldErrors.phone && <p className="text-xs text-destructive">{fieldErrors.phone}</p>}
                     </div>
                   </div>
                   <div className="grid gap-4 sm:grid-cols-2">
@@ -179,9 +234,10 @@ const Onboarding = () => {
                 <CheckCircle className="h-10 w-10 text-success" />
               </div>
               <h2 className="text-2xl font-bold text-foreground">Your dashboard is ready!</h2>
-              <p className="text-muted-foreground">You're all set. Start managing your {BUSINESS_TYPE_OPTIONS.find(o => o.value === businessType)?.label.toLowerCase() || 'business'} now.</p>
-              <Button size="lg" onClick={handleFinish}>
-                Go to Dashboard <ArrowRight className="ml-2 h-4 w-4" />
+              <p className="text-muted-foreground">You're all set. Start managing your {platformOptions.find(o => o.value === businessType)?.label.toLowerCase() || 'business'} now.</p>
+              {submitError && <p className="text-sm text-destructive">{submitError}</p>}
+              <Button size="lg" onClick={handleFinish} disabled={submitting}>
+                {submitting ? 'Finishing setup...' : 'Go to Dashboard'} <ArrowRight className="ml-2 h-4 w-4" />
               </Button>
             </div>
           )}

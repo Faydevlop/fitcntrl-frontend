@@ -1,20 +1,81 @@
+import { useMemo } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import EmptyState from '@/components/EmptyState';
 import { Wallet } from 'lucide-react';
-import { payments } from '@/data/mockData';
-import { useTableControls } from '@/hooks/useTableControls';
 import { TableSearchBar, SortableHeader, TablePagination } from '@/components/TableControls';
+import { useServerTableControls } from '@/hooks/useServerTableControls';
+import { useQuery } from '@tanstack/react-query';
+import { gymApi } from '@/services/api';
+import TablePageSkeleton from '@/components/loaders/TablePageSkeleton';
+
+type Payment = {
+  id: string;
+  memberId: string;
+  memberName: string;
+  amount: number;
+  paidDate: string;
+  month: string;
+  method: 'cash' | 'upi' | 'card' | 'online';
+  isPartial?: boolean;
+  notes?: string;
+};
+
+const mapPayment = (row: any, memberNameById: Record<string, string>): Payment => ({
+  id: String(row?._id || row?.id || ''),
+  memberId: String(row?.memberId || ''),
+  memberName: memberNameById[String(row?.memberId || '')] || 'Member',
+  amount: Number(row?.amount || 0),
+  paidDate: row?.paidDate ? new Date(row.paidDate).toISOString().split('T')[0] : '-',
+  month: String(row?.monthLabel || '-'),
+  method: row?.method === 'upi' ? 'upi' : row?.method === 'card' ? 'card' : row?.method === 'online' ? 'online' : 'cash',
+  isPartial: Boolean(row?.isPartial),
+  notes: row?.notes ? String(row.notes) : '',
+});
 
 const GymPayments = () => {
-  const table = useTableControls({
-    data: payments,
-    searchFields: ['memberName', 'month', 'method'],
+  const table = useServerTableControls({
+    searchFields: ['memberName', 'monthLabel', 'method'],
     pageSize: 10,
+    sortKeyMap: {
+      memberName: 'memberId',
+      month: 'monthLabel',
+    },
   });
 
-  if (payments.length === 0) {
+  const { data: membersResponse } = useQuery({
+    queryKey: ['gym-members-map'],
+    queryFn: () =>
+      gymApi.listMembers({
+        options: { page: 1, itemsPerPage: 500, sortBy: ['createdAt'], sortDesc: [true] },
+      }),
+  });
+
+  const memberNameById = useMemo(() => {
+    return (membersResponse?.tableData || []).reduce((acc: Record<string, string>, row: any) => {
+      acc[String(row?._id || '')] = String(row?.name || 'Member');
+      return acc;
+    }, {});
+  }, [membersResponse]);
+
+  const { data, isLoading } = useQuery({
+    queryKey: ['gym-payments', table.search, table.sort, table.page],
+    queryFn: () => gymApi.listPayments(table.toPayload()),
+  });
+
+  const payments = useMemo(
+    () => (data?.tableData || []).map((row: any) => mapPayment(row, memberNameById)),
+    [data, memberNameById],
+  );
+  const totalCount = data?.totalCount || 0;
+  const totalPages = Math.max(1, Math.ceil(totalCount / table.pageSize));
+
+  if (isLoading && !data) {
+    return <TablePageSkeleton columns={6} />;
+  }
+
+  if (!isLoading && payments.length === 0) {
     return (
       <div className="space-y-6">
         <div>
@@ -30,7 +91,7 @@ const GymPayments = () => {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-foreground">Payments</h1>
-        <p className="text-sm text-muted-foreground">{payments.length} payments recorded</p>
+        <p className="text-sm text-muted-foreground">{totalCount} payments recorded</p>
       </div>
 
       <TableSearchBar value={table.search} onChange={table.setSearch} placeholder="Search payments..." />
@@ -50,7 +111,14 @@ const GymPayments = () => {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {table.paginatedData.map(p => (
+                {isLoading && (
+                  <TableRow>
+                    <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
+                      Loading payments...
+                    </TableCell>
+                  </TableRow>
+                )}
+                {!isLoading && payments.map(p => (
                   <TableRow key={p.id}>
                     <TableCell className="font-medium">{p.memberName}</TableCell>
                     <TableCell>₹{p.amount.toLocaleString()}</TableCell>
@@ -66,7 +134,7 @@ const GymPayments = () => {
               </TableBody>
             </Table>
           </div>
-          <TablePagination page={table.page} totalPages={table.totalPages} totalItems={table.totalFiltered} onPageChange={table.setPage} />
+          <TablePagination page={table.page} totalPages={totalPages} totalItems={totalCount} onPageChange={table.setPage} />
         </CardContent>
       </Card>
     </div>
