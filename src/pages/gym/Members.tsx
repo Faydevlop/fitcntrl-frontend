@@ -12,7 +12,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Plus, Pencil, Trash2, CheckCircle, Search, Filter, UserCircle, Copy } from 'lucide-react';
+import { Plus, Pencil, Trash2, CheckCircle, Search, Filter, UserCircle, Copy, SendHorizontal } from 'lucide-react';
 import EmptyState from '@/components/EmptyState';
 import { useAuth } from '@/contexts/AuthContext';
 import { getBusinessLabel } from '@/data/businessTypes';
@@ -23,6 +23,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { gymApi } from '@/services/api';
 import { useAppSelector } from '@/store/hooks';
 import TablePageSkeleton from '@/components/loaders/TablePageSkeleton';
+import { toast } from '@/components/ui/sonner';
 
 type MemberStatus = 'active' | 'paused' | 'expired' | 'blacklisted';
 
@@ -79,9 +80,11 @@ const GymMembers = () => {
   const labels = getBusinessLabel(user?.platformType || user?.businessType || 'gym');
   const [filterStatus, setFilterStatus] = useState<'all' | 'paid' | 'pending'>('all');
   const [addOpen, setAddOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
   const [payOpen, setPayOpen] = useState(false);
   const [profileMember, setProfileMember] = useState<Member | null>(null);
   const [selectedMember, setSelectedMember] = useState<Member | null>(null);
+  const [editingMemberId, setEditingMemberId] = useState('');
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [newMember, setNewMember] = useState({
     name: '',
@@ -96,6 +99,18 @@ const GymMembers = () => {
   });
   const [newMemberFieldErrors, setNewMemberFieldErrors] = useState<Record<string, string>>({});
   const [newMemberError, setNewMemberError] = useState('');
+  const [editMember, setEditMember] = useState({
+    name: '',
+    countryCode: '91',
+    phone: '',
+    plan: 'monthly' as 'monthly' | 'quarterly' | 'yearly',
+    fee: '',
+    nextDueDate: getNextMonthFirstDateInput(getTodayDateInput()),
+    status: 'active' as MemberStatus,
+    notes: '',
+  });
+  const [editMemberFieldErrors, setEditMemberFieldErrors] = useState<Record<string, string>>({});
+  const [editMemberError, setEditMemberError] = useState('');
   const [paymentForm, setPaymentForm] = useState({
     amount: '',
     paidDate: '',
@@ -132,6 +147,22 @@ const GymMembers = () => {
     });
     setNewMemberFieldErrors({});
     setNewMemberError('');
+  };
+
+  const resetEditMemberForm = () => {
+    setEditMember({
+      name: '',
+      countryCode: '91',
+      phone: '',
+      plan: 'monthly',
+      fee: '',
+      nextDueDate: getNextMonthFirstDateInput(getTodayDateInput()),
+      status: 'active',
+      notes: '',
+    });
+    setEditingMemberId('');
+    setEditMemberFieldErrors({});
+    setEditMemberError('');
   };
 
   const { data, isLoading } = useQuery({
@@ -215,11 +246,61 @@ const GymMembers = () => {
     },
   });
 
+  const updateMemberMutation = useMutation({
+    mutationFn: () =>
+      gymApi.updateMember(editingMemberId, {
+        name: editMember.name.trim(),
+        countryCode: editMember.countryCode.trim(),
+        phone: editMember.phone.trim(),
+        plan: editMember.plan,
+        fee: Number(editMember.fee || 0),
+        nextDueDate: editMember.nextDueDate || undefined,
+        status: editMember.status,
+        notes: editMember.notes.trim(),
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['gym-members'] });
+      queryClient.invalidateQueries({ queryKey: ['gym-dashboard-live'] });
+      setEditOpen(false);
+      resetEditMemberForm();
+      toast.success('Member updated successfully');
+    },
+    onError: (error: unknown) => {
+      setEditMemberError(error instanceof Error ? error.message : 'Unable to update member');
+    },
+  });
+
   const deleteMemberMutation = useMutation({
     mutationFn: (id: string) => gymApi.deleteMember(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['gym-members'] });
       queryClient.invalidateQueries({ queryKey: ['gym-dashboard-live'] });
+    },
+  });
+
+  const sendAllPaymentRequestsMutation = useMutation({
+    mutationFn: () => gymApi.sendCurrentMonthPaymentRequests(),
+    onSuccess: (response: any) => {
+      const queuedCount = Number(response?.queuedCount || 0);
+      const failedCount = Number(response?.failedCount || 0);
+      toast.success(`Payment requests queued: ${queuedCount * 2} messages`);
+      if (failedCount > 0) {
+        toast.error(`${failedCount} members failed while sending payment requests`);
+      }
+      queryClient.invalidateQueries({ queryKey: ['gym-members'] });
+    },
+    onError: (error: unknown) => {
+      toast.error(error instanceof Error ? error.message : 'Unable to send payment requests');
+    },
+  });
+
+  const sendMemberPaymentRequestMutation = useMutation({
+    mutationFn: (memberId: string) => gymApi.sendPaymentRequestToMember(memberId),
+    onSuccess: () => {
+      toast.success('Payment request sent (reminder + UPI link)');
+    },
+    onError: (error: unknown) => {
+      toast.error(error instanceof Error ? error.message : 'Unable to send payment request');
     },
   });
 
@@ -234,6 +315,10 @@ const GymMembers = () => {
     });
     setPaymentError('');
     setPayOpen(true);
+  };
+
+  const handleSendPaymentRequest = (member: Member) => {
+    sendMemberPaymentRequestMutation.mutate(member.id);
   };
 
   const handleSaveMember = () => {
@@ -251,6 +336,48 @@ const GymMembers = () => {
     if (Object.keys(errors).length > 0) return;
     setNewMemberError('');
     createMemberMutation.mutate();
+  };
+
+  const handleEditMember = (member: Member) => {
+    setEditingMemberId(member.id);
+    setEditMember({
+      name: member.name,
+      countryCode: member.countryCode || '91',
+      phone: member.phone,
+      plan: 'monthly',
+      fee: String(member.fee || 0),
+      nextDueDate: member.nextDueDate && member.nextDueDate !== '-' ? member.nextDueDate : getNextMonthFirstDateInput(),
+      status: member.status,
+      notes: member.notes || '',
+    });
+    setEditMemberFieldErrors({});
+    setEditMemberError('');
+    setEditOpen(true);
+  };
+
+  const handleUpdateMember = () => {
+    const errors: Record<string, string> = {};
+    if (!editMember.name.trim()) errors.name = 'Name is required';
+    if (!editMember.countryCode.trim()) {
+      errors.countryCode = 'Country code is required';
+    } else if (!/^\d{1,4}$/.test(editMember.countryCode.trim())) {
+      errors.countryCode = 'Use country code like 91';
+    }
+    if (!editMember.phone.trim()) errors.phone = 'Phone is required';
+    if (!editMember.fee.trim()) errors.fee = 'Fee is required';
+    if (Number(editMember.fee) < 0) errors.fee = 'Fee must be zero or more';
+    if (!editMember.nextDueDate) {
+      errors.nextDueDate = 'Next due date is required';
+    } else {
+      const dueDate = new Date(editMember.nextDueDate);
+      if (Number.isNaN(dueDate.getTime()) || dueDate.getDate() !== 1) {
+        errors.nextDueDate = "Next due date must be the 1st day of month";
+      }
+    }
+    setEditMemberFieldErrors(errors);
+    if (Object.keys(errors).length > 0) return;
+    setEditMemberError('');
+    updateMemberMutation.mutate();
   };
 
   const confirmPayment = () => {
@@ -331,6 +458,14 @@ const GymMembers = () => {
           <p className="text-sm text-muted-foreground">{totalCount} total {labels.entityLabelPlural.toLowerCase()}</p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <Button
+            variant="outline"
+            onClick={() => sendAllPaymentRequestsMutation.mutate()}
+            disabled={sendAllPaymentRequestsMutation.isPending}
+          >
+            <SendHorizontal className="mr-2 h-4 w-4" />
+            {sendAllPaymentRequestsMutation.isPending ? 'Sending...' : 'Send Payment Requests'}
+          </Button>
           <Dialog
             open={addOpen}
             onOpenChange={open => {
@@ -457,6 +592,114 @@ const GymMembers = () => {
               </div>
             </DialogContent>
           </Dialog>
+          <Dialog
+            open={editOpen}
+            onOpenChange={open => {
+              setEditOpen(open);
+              if (!open) resetEditMemberForm();
+            }}
+          >
+            <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+              <DialogHeader>
+                <DialogTitle>Edit {labels.entityLabel}</DialogTitle>
+              </DialogHeader>
+              <div className="grid gap-4 py-4">
+                <div className="grid gap-2">
+                  <Label>Name</Label>
+                  <Input
+                    placeholder={`${labels.entityLabel} name`}
+                    value={editMember.name}
+                    onChange={event => setEditMember(prev => ({ ...prev, name: event.target.value }))}
+                  />
+                  {editMemberFieldErrors.name && <p className="text-xs text-destructive">{editMemberFieldErrors.name}</p>}
+                </div>
+                <div className="grid gap-4 sm:grid-cols-3">
+                  <div className="grid gap-2">
+                    <Label>Country Code</Label>
+                    <Input
+                      placeholder="91"
+                      value={editMember.countryCode}
+                      onChange={event => setEditMember(prev => ({ ...prev, countryCode: event.target.value }))}
+                    />
+                    {editMemberFieldErrors.countryCode && (
+                      <p className="text-xs text-destructive">{editMemberFieldErrors.countryCode}</p>
+                    )}
+                  </div>
+                  <div className="grid gap-2 sm:col-span-2">
+                    <Label>Phone</Label>
+                    <Input
+                      placeholder="9876543210"
+                      value={editMember.phone}
+                      onChange={event => setEditMember(prev => ({ ...prev, phone: event.target.value }))}
+                    />
+                    {editMemberFieldErrors.phone && <p className="text-xs text-destructive">{editMemberFieldErrors.phone}</p>}
+                  </div>
+                </div>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="grid gap-2">
+                    <Label>Plan</Label>
+                    <Input value="Monthly" readOnly />
+                    <p className="text-xs text-muted-foreground">Plan is fixed to monthly.</p>
+                  </div>
+                  <div className="grid gap-2">
+                    <Label>{labels.feeLabel} (₹)</Label>
+                    <Input
+                      type="number"
+                      placeholder="1500"
+                      value={editMember.fee}
+                      onChange={event => setEditMember(prev => ({ ...prev, fee: event.target.value }))}
+                    />
+                    {editMemberFieldErrors.fee && <p className="text-xs text-destructive">{editMemberFieldErrors.fee}</p>}
+                  </div>
+                </div>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="grid gap-2">
+                    <Label>Next Due Date</Label>
+                    <Input
+                      type="date"
+                      value={editMember.nextDueDate}
+                      onChange={event =>
+                        setEditMember(prev => ({
+                          ...prev,
+                          nextDueDate: event.target.value,
+                        }))
+                      }
+                    />
+                    {editMemberFieldErrors.nextDueDate && (
+                      <p className="text-xs text-destructive">{editMemberFieldErrors.nextDueDate}</p>
+                    )}
+                    <p className="text-xs text-muted-foreground">
+                      Scheduled notifications are sent automatically on every month&apos;s 1st.
+                    </p>
+                  </div>
+                  <div className="grid gap-2">
+                    <Label>Status</Label>
+                    <Select value={editMember.status} onValueChange={value => setEditMember(prev => ({ ...prev, status: value as MemberStatus }))}>
+                      <SelectTrigger><SelectValue placeholder="Status" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="active">Active</SelectItem>
+                        <SelectItem value="paused">Paused</SelectItem>
+                        <SelectItem value="expired">Expired</SelectItem>
+                        <SelectItem value="blacklisted">Blacklisted</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <div className="grid gap-2">
+                  <Label>Notes</Label>
+                  <Textarea
+                    placeholder="Optional notes..."
+                    value={editMember.notes}
+                    onChange={event => setEditMember(prev => ({ ...prev, notes: event.target.value }))}
+                  />
+                </div>
+                {editMemberError && <p className="text-xs text-destructive">{editMemberError}</p>}
+                <Button className="mt-2" onClick={handleUpdateMember} disabled={updateMemberMutation.isPending}>
+                  {updateMemberMutation.isPending ? 'Saving...' : `Update ${labels.entityLabel}`}
+                </Button>
+              </div>
+            </DialogContent>
+          </Dialog>
         </div>
       </div>
 
@@ -556,10 +799,21 @@ const GymMembers = () => {
                               <CheckCircle className="h-4 w-4" />
                             </Button>
                           )}
+                          {m.paymentStatus === 'pending' && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 text-primary"
+                              onClick={() => handleSendPaymentRequest(m)}
+                              disabled={sendMemberPaymentRequestMutation.isPending}
+                            >
+                              <SendHorizontal className="h-4 w-4" />
+                            </Button>
+                          )}
                           <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setProfileMember(m)}>
                             <UserCircle className="h-4 w-4" />
                           </Button>
-                          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setProfileMember(m)}><Pencil className="h-4 w-4" /></Button>
+                          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleEditMember(m)}><Pencil className="h-4 w-4" /></Button>
                           <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => handleDeleteMember(m)}><Trash2 className="h-4 w-4" /></Button>
                         </div>
                       </TableCell>

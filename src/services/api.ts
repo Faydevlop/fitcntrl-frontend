@@ -256,6 +256,16 @@ export const gymApi = {
       body: payload,
       auth: true,
     }),
+  sendCurrentMonthPaymentRequests: () =>
+    apiRequest<any>("/gym/payments/reminders/send-all", {
+      method: "POST",
+      auth: true,
+    }),
+  sendPaymentRequestToMember: (memberId: string) =>
+    apiRequest<any>(`/gym/members/${memberId}/send-payment-request`, {
+      method: "POST",
+      auth: true,
+    }),
   billingSummary: () => apiRequest<any>("/gym/billing", { auth: true }),
   updateSettings: (payload: {
     name?: string;
