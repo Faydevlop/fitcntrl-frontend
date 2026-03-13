@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
@@ -12,14 +12,36 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Plus, Pencil, Trash2, CheckCircle, Search, Filter, Upload, Download, Send, UserCircle, Copy, MessageSquare } from 'lucide-react';
+import { Plus, Pencil, Trash2, CheckCircle, Search, Filter, UserCircle, Copy, SendHorizontal } from 'lucide-react';
 import EmptyState from '@/components/EmptyState';
-import { members as initialMembers, payments, gyms, type Member, type MemberStatus } from '@/data/mockData';
 import { useAuth } from '@/contexts/AuthContext';
 import { getBusinessLabel } from '@/data/businessTypes';
 import { Users } from 'lucide-react';
-import { useTableControls } from '@/hooks/useTableControls';
 import { SortableHeader, TablePagination } from '@/components/TableControls';
+import { useServerTableControls } from '@/hooks/useServerTableControls';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { gymApi } from '@/services/api';
+import { useAppSelector } from '@/store/hooks';
+import TablePageSkeleton from '@/components/loaders/TablePageSkeleton';
+import { toast } from '@/components/ui/sonner';
+
+type MemberStatus = 'active' | 'paused' | 'expired' | 'blacklisted';
+
+type Member = {
+  id: string;
+  countryCode: string;
+  name: string;
+  phone: string;
+  plan: 'monthly' | 'quarterly' | 'yearly';
+  fee: number;
+  joinDate: string;
+  nextDueDate: string;
+  status: MemberStatus;
+  paymentStatus: 'paid' | 'pending';
+  notes: string;
+  lastPaymentDate?: string;
+  lastPaymentMethod?: 'cash' | 'upi' | 'card' | 'online';
+};
 
 const statusStyles: Record<MemberStatus, string> = {
   active: 'bg-success/10 text-success hover:bg-success/20',
@@ -28,43 +50,356 @@ const statusStyles: Record<MemberStatus, string> = {
   blacklisted: 'bg-destructive/10 text-destructive hover:bg-destructive/20',
 };
 
+const toDateInputValue = (date: Date): string => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+const getTodayDateInput = (): string => toDateInputValue(new Date());
+
+const getNextMonthFirstDateInput = (baseDateInput?: string): string => {
+  const baseDate = baseDateInput ? new Date(baseDateInput) : new Date();
+  if (Number.isNaN(baseDate.getTime())) {
+    return getNextMonthFirstDateInput();
+  }
+  return toDateInputValue(new Date(baseDate.getFullYear(), baseDate.getMonth() + 1, 1));
+};
+
+const formatPhoneWithCode = (countryCode: string, phone: string): string => {
+  const normalizedPhone = phone.trim();
+  if (!normalizedPhone) return '';
+  if (normalizedPhone.startsWith('+')) return normalizedPhone;
+  return `${countryCode.trim() || '91'} ${normalizedPhone}`.trim();
+};
+
 const GymMembers = () => {
+  const queryClient = useQueryClient();
   const { user } = useAuth();
-  const labels = getBusinessLabel(user?.businessType || 'gym');
-  const [memberList, setMemberList] = useState<Member[]>(initialMembers);
-  const [search, setSearch] = useState('');
+  const labels = getBusinessLabel(user?.platformType || user?.businessType || 'gym');
   const [filterStatus, setFilterStatus] = useState<'all' | 'paid' | 'pending'>('all');
   const [addOpen, setAddOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
   const [payOpen, setPayOpen] = useState(false);
-  const [importOpen, setImportOpen] = useState(false);
   const [profileMember, setProfileMember] = useState<Member | null>(null);
   const [selectedMember, setSelectedMember] = useState<Member | null>(null);
+  const [editingMemberId, setEditingMemberId] = useState('');
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [newMember, setNewMember] = useState({
+    name: '',
+    countryCode: '91',
+    phone: '',
+    plan: 'monthly' as 'monthly' | 'quarterly' | 'yearly',
+    fee: '',
+    joinDate: getTodayDateInput(),
+    nextDueDate: getNextMonthFirstDateInput(getTodayDateInput()),
+    status: 'active' as MemberStatus,
+    notes: '',
+  });
+  const [newMemberFieldErrors, setNewMemberFieldErrors] = useState<Record<string, string>>({});
+  const [newMemberError, setNewMemberError] = useState('');
+  const [editMember, setEditMember] = useState({
+    name: '',
+    countryCode: '91',
+    phone: '',
+    plan: 'monthly' as 'monthly' | 'quarterly' | 'yearly',
+    fee: '',
+    nextDueDate: getNextMonthFirstDateInput(getTodayDateInput()),
+    status: 'active' as MemberStatus,
+    notes: '',
+  });
+  const [editMemberFieldErrors, setEditMemberFieldErrors] = useState<Record<string, string>>({});
+  const [editMemberError, setEditMemberError] = useState('');
+  const [paymentForm, setPaymentForm] = useState({
+    amount: '',
+    paidDate: '',
+    method: 'cash',
+    isPartial: false,
+    notes: '',
+  });
+  const [paymentError, setPaymentError] = useState('');
 
-  const currentGym = gyms.find(g => g.id === '1')!;
-
-  const preFiltered = memberList.filter(m => {
-    const matchesSearch = m.name.toLowerCase().includes(search.toLowerCase()) || m.phone.includes(search);
-    const matchesFilter = filterStatus === 'all' || m.paymentStatus === filterStatus;
-    return matchesSearch && matchesFilter;
+  const table = useServerTableControls({
+    searchFields: ['name', 'phone', 'plan', 'status', 'paymentStatus'],
+    pageSize: 10,
   });
 
-  const table = useTableControls({
-    data: preFiltered,
-    searchFields: [],
-    pageSize: 10,
+  const constantsData = useAppSelector(state => state.app.constants);
+
+  const platformType = user?.platformType || user?.businessType || 'gym';
+  const platformOptions = constantsData?.[`${platformType}_options`] || {};
+  const categoryOptions: string[] = Array.isArray(platformOptions?.categories) ? platformOptions.categories : labels.categories;
+  const paymentMethods: string[] = Array.isArray(platformOptions?.paymentMethods) ? platformOptions.paymentMethods : ['cash', 'upi', 'card', 'online'];
+
+  const resetNewMemberForm = () => {
+    const today = getTodayDateInput();
+    setNewMember({
+      name: '',
+      countryCode: '91',
+      phone: '',
+      plan: 'monthly',
+      fee: '',
+      joinDate: today,
+      nextDueDate: getNextMonthFirstDateInput(today),
+      status: 'active',
+      notes: '',
+    });
+    setNewMemberFieldErrors({});
+    setNewMemberError('');
+  };
+
+  const resetEditMemberForm = () => {
+    setEditMember({
+      name: '',
+      countryCode: '91',
+      phone: '',
+      plan: 'monthly',
+      fee: '',
+      nextDueDate: getNextMonthFirstDateInput(getTodayDateInput()),
+      status: 'active',
+      notes: '',
+    });
+    setEditingMemberId('');
+    setEditMemberFieldErrors({});
+    setEditMemberError('');
+  };
+
+  const { data, isLoading } = useQuery({
+    queryKey: ['gym-members', table.search, table.sort, table.page, filterStatus],
+    queryFn: () =>
+      gymApi.listMembers(
+        table.toPayload(filterStatus === 'all' ? {} : { paymentStatus: filterStatus }),
+      ),
+  });
+
+  const memberList = useMemo(() => {
+    return (data?.tableData || []).map((row: any) => ({
+      id: String(row?._id || ''),
+      countryCode: String(row?.countryCode || '91'),
+      name: String(row?.name || ''),
+      phone: String(row?.phone || ''),
+      plan: row?.plan === 'quarterly' ? 'quarterly' : row?.plan === 'yearly' ? 'yearly' : 'monthly',
+      fee: Number(row?.fee || 0),
+      joinDate: row?.joinDate ? new Date(row.joinDate).toISOString().split('T')[0] : '-',
+      nextDueDate: row?.nextDueDate ? new Date(row.nextDueDate).toISOString().split('T')[0] : '-',
+      status: row?.status === 'paused' ? 'paused' : row?.status === 'expired' ? 'expired' : row?.status === 'blacklisted' ? 'blacklisted' : 'active',
+      paymentStatus: row?.paymentStatus === 'paid' ? 'paid' : 'pending',
+      notes: String(row?.notes || ''),
+      lastPaymentDate: row?.lastPaymentDate ? new Date(row.lastPaymentDate).toISOString().split('T')[0] : undefined,
+      lastPaymentMethod: row?.lastPaymentMethod || undefined,
+    })) as Member[];
+  }, [data]);
+
+  const totalCount = data?.totalCount || 0;
+  const totalPages = Math.max(1, Math.ceil(totalCount / table.pageSize));
+
+  const { data: billingData } = useQuery({
+    queryKey: ['gym-billing-lite'],
+    queryFn: () => gymApi.billingSummary(),
+  });
+
+  const currentGym = billingData?.gym || {};
+
+  const paymentMutation = useMutation({
+    mutationFn: (payload: { member: Member; amount: number; paidDate: string; method: string; isPartial: boolean; notes: string }) =>
+      gymApi.createPayment({
+        memberId: payload.member.id,
+        amount: payload.amount,
+        paidDate: new Date(payload.paidDate).toISOString(),
+        monthLabel: new Date(payload.paidDate).toLocaleString('default', { month: 'long', year: 'numeric' }),
+        method: payload.method,
+        isPartial: payload.isPartial,
+        notes: payload.notes.trim() || undefined,
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['gym-members'] });
+      queryClient.invalidateQueries({ queryKey: ['gym-payments'] });
+      queryClient.invalidateQueries({ queryKey: ['gym-dashboard-live'] });
+      setPayOpen(false);
+      setSelectedMember(null);
+      setPaymentError('');
+    },
+  });
+
+  const createMemberMutation = useMutation({
+    mutationFn: () =>
+      gymApi.createMember({
+        name: newMember.name.trim(),
+        countryCode: newMember.countryCode.trim(),
+        phone: newMember.phone.trim(),
+        plan: newMember.plan,
+        fee: Number(newMember.fee || 0),
+        joinDate: newMember.joinDate || new Date().toISOString(),
+        nextDueDate: newMember.nextDueDate || undefined,
+        status: newMember.status,
+        notes: newMember.notes.trim(),
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['gym-members'] });
+      queryClient.invalidateQueries({ queryKey: ['gym-dashboard-live'] });
+      setAddOpen(false);
+      resetNewMemberForm();
+    },
+    onError: (error: unknown) => {
+      setNewMemberError(error instanceof Error ? error.message : 'Unable to create member');
+    },
+  });
+
+  const updateMemberMutation = useMutation({
+    mutationFn: () =>
+      gymApi.updateMember(editingMemberId, {
+        name: editMember.name.trim(),
+        countryCode: editMember.countryCode.trim(),
+        phone: editMember.phone.trim(),
+        plan: editMember.plan,
+        fee: Number(editMember.fee || 0),
+        nextDueDate: editMember.nextDueDate || undefined,
+        status: editMember.status,
+        notes: editMember.notes.trim(),
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['gym-members'] });
+      queryClient.invalidateQueries({ queryKey: ['gym-dashboard-live'] });
+      setEditOpen(false);
+      resetEditMemberForm();
+      toast.success('Member updated successfully');
+    },
+    onError: (error: unknown) => {
+      setEditMemberError(error instanceof Error ? error.message : 'Unable to update member');
+    },
+  });
+
+  const deleteMemberMutation = useMutation({
+    mutationFn: (id: string) => gymApi.deleteMember(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['gym-members'] });
+      queryClient.invalidateQueries({ queryKey: ['gym-dashboard-live'] });
+    },
+  });
+
+  const sendAllPaymentRequestsMutation = useMutation({
+    mutationFn: () => gymApi.sendCurrentMonthPaymentRequests(),
+    onSuccess: (response: any) => {
+      const queuedCount = Number(response?.queuedCount || 0);
+      const failedCount = Number(response?.failedCount || 0);
+      toast.success(`Payment requests queued: ${queuedCount * 2} messages`);
+      if (failedCount > 0) {
+        toast.error(`${failedCount} members failed while sending payment requests`);
+      }
+      queryClient.invalidateQueries({ queryKey: ['gym-members'] });
+    },
+    onError: (error: unknown) => {
+      toast.error(error instanceof Error ? error.message : 'Unable to send payment requests');
+    },
+  });
+
+  const sendMemberPaymentRequestMutation = useMutation({
+    mutationFn: (memberId: string) => gymApi.sendPaymentRequestToMember(memberId),
+    onSuccess: () => {
+      toast.success('Payment request sent (reminder + UPI link)');
+    },
+    onError: (error: unknown) => {
+      toast.error(error instanceof Error ? error.message : 'Unable to send payment request');
+    },
   });
 
   const handleMarkPaid = (member: Member) => {
     setSelectedMember(member);
+    setPaymentForm({
+      amount: String(member.fee || 0),
+      paidDate: new Date().toISOString().split('T')[0],
+      method: paymentMethods[0] || 'cash',
+      isPartial: false,
+      notes: '',
+    });
+    setPaymentError('');
     setPayOpen(true);
+  };
+
+  const handleSendPaymentRequest = (member: Member) => {
+    sendMemberPaymentRequestMutation.mutate(member.id);
+  };
+
+  const handleSaveMember = () => {
+    const errors: Record<string, string> = {};
+    if (!newMember.name.trim()) errors.name = 'Name is required';
+    if (!newMember.countryCode.trim()) {
+      errors.countryCode = 'Country code is required';
+    } else if (!/^\d{1,4}$/.test(newMember.countryCode.trim())) {
+      errors.countryCode = 'Use country code like 91';
+    }
+    if (!newMember.phone.trim()) errors.phone = 'Phone is required';
+    if (!newMember.fee.trim()) errors.fee = 'Fee is required';
+    if (Number(newMember.fee) < 0) errors.fee = 'Fee must be zero or more';
+    setNewMemberFieldErrors(errors);
+    if (Object.keys(errors).length > 0) return;
+    setNewMemberError('');
+    createMemberMutation.mutate();
+  };
+
+  const handleEditMember = (member: Member) => {
+    setEditingMemberId(member.id);
+    setEditMember({
+      name: member.name,
+      countryCode: member.countryCode || '91',
+      phone: member.phone,
+      plan: 'monthly',
+      fee: String(member.fee || 0),
+      nextDueDate: member.nextDueDate && member.nextDueDate !== '-' ? member.nextDueDate : getNextMonthFirstDateInput(),
+      status: member.status,
+      notes: member.notes || '',
+    });
+    setEditMemberFieldErrors({});
+    setEditMemberError('');
+    setEditOpen(true);
+  };
+
+  const handleUpdateMember = () => {
+    const errors: Record<string, string> = {};
+    if (!editMember.name.trim()) errors.name = 'Name is required';
+    if (!editMember.countryCode.trim()) {
+      errors.countryCode = 'Country code is required';
+    } else if (!/^\d{1,4}$/.test(editMember.countryCode.trim())) {
+      errors.countryCode = 'Use country code like 91';
+    }
+    if (!editMember.phone.trim()) errors.phone = 'Phone is required';
+    if (!editMember.fee.trim()) errors.fee = 'Fee is required';
+    if (Number(editMember.fee) < 0) errors.fee = 'Fee must be zero or more';
+    if (!editMember.nextDueDate) {
+      errors.nextDueDate = 'Next due date is required';
+    } else {
+      const dueDate = new Date(editMember.nextDueDate);
+      if (Number.isNaN(dueDate.getTime()) || dueDate.getDate() !== 1) {
+        errors.nextDueDate = "Next due date must be the 1st day of month";
+      }
+    }
+    setEditMemberFieldErrors(errors);
+    if (Object.keys(errors).length > 0) return;
+    setEditMemberError('');
+    updateMemberMutation.mutate();
   };
 
   const confirmPayment = () => {
     if (!selectedMember) return;
-    setMemberList(prev => prev.map(m => m.id === selectedMember.id ? { ...m, paymentStatus: 'paid' as const, lastPaymentDate: new Date().toISOString().split('T')[0], lastPaymentMethod: 'cash' as const } : m));
-    setPayOpen(false);
-    setSelectedMember(null);
+    const amount = Number(paymentForm.amount);
+    if (!paymentForm.paidDate) {
+      setPaymentError('Paid date is required');
+      return;
+    }
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setPaymentError('Amount must be greater than zero');
+      return;
+    }
+    setPaymentError('');
+    paymentMutation.mutate({
+      member: selectedMember,
+      amount,
+      paidDate: paymentForm.paidDate,
+      method: paymentForm.method,
+      isPartial: paymentForm.isPartial,
+      notes: paymentForm.notes,
+    });
   };
 
   const toggleSelect = (id: string) => {
@@ -72,23 +407,47 @@ const GymMembers = () => {
   };
 
   const toggleSelectAll = () => {
-    if (selectedIds.length === preFiltered.length) {
+    if (selectedIds.length === memberList.length) {
       setSelectedIds([]);
     } else {
-      setSelectedIds(preFiltered.map(m => m.id));
+      setSelectedIds(memberList.map(m => m.id));
     }
   };
 
-  const memberPayments = profileMember ? payments.filter(p => p.memberId === profileMember.id) : [];
+  const handleDeleteMember = (member: Member) => {
+    const confirmed = window.confirm(`Blacklist ${member.name}?`);
+    if (!confirmed) return;
+    deleteMemberMutation.mutate(member.id);
+  };
+
+  const { data: profileData } = useQuery({
+    queryKey: ['gym-member-profile', profileMember?.id],
+    queryFn: () => gymApi.getMemberById(profileMember!.id),
+    enabled: Boolean(profileMember?.id),
+  });
+
+  const memberPayments = profileData?.payments
+    ? profileData.payments.map((payment: any) => ({
+      id: String(payment?._id || ''),
+      paidDate: payment?.paidDate ? new Date(payment.paidDate).toISOString().split('T')[0] : '-',
+      amount: Number(payment?.amount || 0),
+      method: payment?.method || 'cash',
+      notes: payment?.notes || '',
+    }))
+    : [];
   const totalPaid = memberPayments.reduce((sum, p) => sum + p.amount, 0);
+
+  if (isLoading && !data) {
+    return <TablePageSkeleton columns={11} />;
+  }
 
   // UPI link generation
   const generateUpiLink = (member: Member) => {
-    const upiId = currentGym.upiId || '';
+    const upiId = currentGym?.upiId || '';
     if (!upiId) return '';
     const now = new Date();
     const month = now.toLocaleString('default', { month: 'long' });
-    return `upi://pay?pa=${upiId}&pn=${encodeURIComponent(currentGym.gymDisplayName || currentGym.name)}&am=${member.fee}&tn=Gym Fee ${month}`;
+    return `upi://pay?pa=${upiId}&pn=${encodeURIComponent(currentGym?.gymDisplayName || currentGym?.name || 'Gym')}&am=${member.fee}&tn=Gym Fee ${month}`;
   };
 
   return (
@@ -96,35 +455,26 @@ const GymMembers = () => {
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold text-foreground">{labels.entityLabelPlural}</h1>
-          <p className="text-sm text-muted-foreground">{memberList.length} total {labels.entityLabelPlural.toLowerCase()}</p>
+          <p className="text-sm text-muted-foreground">{totalCount} total {labels.entityLabelPlural.toLowerCase()}</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Dialog open={importOpen} onOpenChange={setImportOpen}>
+          <Button
+            variant="outline"
+            onClick={() => sendAllPaymentRequestsMutation.mutate()}
+            disabled={sendAllPaymentRequestsMutation.isPending}
+          >
+            <SendHorizontal className="mr-2 h-4 w-4" />
+            {sendAllPaymentRequestsMutation.isPending ? 'Sending...' : 'Send Payment Requests'}
+          </Button>
+          <Dialog
+            open={addOpen}
+            onOpenChange={open => {
+              setAddOpen(open);
+              if (!open) resetNewMemberForm();
+            }}
+          >
             <DialogTrigger asChild>
-              <Button variant="outline"><Upload className="mr-2 h-4 w-4" /> Import CSV</Button>
-            </DialogTrigger>
-            <DialogContent className="max-w-lg">
-              <DialogHeader>
-                <DialogTitle>Import Members from CSV</DialogTitle>
-              </DialogHeader>
-              <div className="grid gap-4 py-4">
-                <div className="grid gap-2">
-                  <Label>Upload CSV File</Label>
-                  <Input type="file" accept=".csv" />
-                </div>
-                <div className="rounded-lg border border-border p-4">
-                  <p className="text-sm font-medium text-foreground mb-2">Preview</p>
-                  <p className="text-xs text-muted-foreground">Upload a CSV file to see a preview of the data before importing.</p>
-                </div>
-                <Button onClick={() => setImportOpen(false)}>
-                  <Upload className="mr-2 h-4 w-4" /> Confirm Import
-                </Button>
-              </div>
-            </DialogContent>
-          </Dialog>
-          <Dialog open={addOpen} onOpenChange={setAddOpen}>
-            <DialogTrigger asChild>
-              <Button><Plus className="mr-2 h-4 w-4" /> Add Member</Button>
+              <Button onClick={resetNewMemberForm}><Plus className="mr-2 h-4 w-4" /> Add Member</Button>
             </DialogTrigger>
             <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
               <DialogHeader>
@@ -133,42 +483,82 @@ const GymMembers = () => {
               <div className="grid gap-4 py-4">
                 <div className="grid gap-2">
                   <Label>Name</Label>
-                  <Input placeholder={`${labels.entityLabel} name`} />
+                  <Input
+                    placeholder={`${labels.entityLabel} name`}
+                    value={newMember.name}
+                    onChange={event => setNewMember(prev => ({ ...prev, name: event.target.value }))}
+                  />
+                  {newMemberFieldErrors.name && <p className="text-xs text-destructive">{newMemberFieldErrors.name}</p>}
                 </div>
-                <div className="grid gap-2">
-                  <Label>Phone</Label>
-                  <Input placeholder="+91 XXXXX XXXXX" />
+                <div className="grid gap-4 sm:grid-cols-3">
+                  <div className="grid gap-2">
+                    <Label>Country Code</Label>
+                    <Input
+                      placeholder="91"
+                      value={newMember.countryCode}
+                      onChange={event => setNewMember(prev => ({ ...prev, countryCode: event.target.value }))}
+                    />
+                    {newMemberFieldErrors.countryCode && (
+                      <p className="text-xs text-destructive">{newMemberFieldErrors.countryCode}</p>
+                    )}
+                  </div>
+                  <div className="grid gap-2 sm:col-span-2">
+                    <Label>Phone</Label>
+                    <Input
+                      placeholder="9876543210"
+                      value={newMember.phone}
+                      onChange={event => setNewMember(prev => ({ ...prev, phone: event.target.value }))}
+                    />
+                    {newMemberFieldErrors.phone && <p className="text-xs text-destructive">{newMemberFieldErrors.phone}</p>}
+                  </div>
                 </div>
                 <div className="grid gap-4 sm:grid-cols-2">
                   <div className="grid gap-2">
                     <Label>Plan</Label>
-                    <Select>
-                      <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="monthly">Monthly</SelectItem>
-                        <SelectItem value="quarterly">Quarterly</SelectItem>
-                        <SelectItem value="yearly">Yearly</SelectItem>
-                      </SelectContent>
-                    </Select>
+                    <Input value="Monthly" readOnly />
+                    <p className="text-xs text-muted-foreground">Plan is fixed to monthly.</p>
                   </div>
                   <div className="grid gap-2">
                     <Label>{labels.feeLabel} (₹)</Label>
-                    <Input type="number" placeholder="1500" />
+                    <Input
+                      type="number"
+                      placeholder="1500"
+                      value={newMember.fee}
+                      onChange={event => setNewMember(prev => ({ ...prev, fee: event.target.value }))}
+                    />
+                    {newMemberFieldErrors.fee && <p className="text-xs text-destructive">{newMemberFieldErrors.fee}</p>}
                   </div>
                 </div>
                 <div className="grid gap-4 sm:grid-cols-2">
                   <div className="grid gap-2">
                     <Label>Join Date</Label>
-                    <Input type="date" />
+                    <Input
+                      type="date"
+                      value={newMember.joinDate}
+                      onChange={event =>
+                        setNewMember(prev => ({
+                          ...prev,
+                          joinDate: event.target.value,
+                          nextDueDate: getNextMonthFirstDateInput(event.target.value),
+                        }))
+                      }
+                    />
                   </div>
                   <div className="grid gap-2">
                     <Label>Next Due Date</Label>
-                    <Input type="date" />
+                    <Input
+                      type="date"
+                      value={newMember.nextDueDate}
+                      readOnly
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Scheduled notifications are sent automatically on every month&apos;s 1st.
+                    </p>
                   </div>
                 </div>
                 <div className="grid gap-2">
                   <Label>Status</Label>
-                  <Select>
+                  <Select value={newMember.status} onValueChange={value => setNewMember(prev => ({ ...prev, status: value as MemberStatus }))}>
                     <SelectTrigger><SelectValue placeholder="Status" /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="active">Active</SelectItem>
@@ -183,15 +573,130 @@ const GymMembers = () => {
                   <Select>
                     <SelectTrigger><SelectValue placeholder={`Select ${labels.categoryLabel.toLowerCase()}`} /></SelectTrigger>
                     <SelectContent>
-                      {labels.categories.map(c => <SelectItem key={c} value={c.toLowerCase().replace(/\s+/g, '_')}>{c}</SelectItem>)}
+                      {categoryOptions.map(c => <SelectItem key={c} value={c.toLowerCase().replace(/\s+/g, '_')}>{c}</SelectItem>)}
                     </SelectContent>
                   </Select>
                 </div>
                 <div className="grid gap-2">
                   <Label>Notes</Label>
-                  <Textarea placeholder="Optional notes..." />
+                  <Textarea
+                    placeholder="Optional notes..."
+                    value={newMember.notes}
+                    onChange={event => setNewMember(prev => ({ ...prev, notes: event.target.value }))}
+                  />
                 </div>
-                <Button className="mt-2" onClick={() => setAddOpen(false)}>Save {labels.entityLabel}</Button>
+                {newMemberError && <p className="text-xs text-destructive">{newMemberError}</p>}
+                <Button className="mt-2" onClick={handleSaveMember} disabled={createMemberMutation.isPending}>
+                  {createMemberMutation.isPending ? 'Saving...' : `Save ${labels.entityLabel}`}
+                </Button>
+              </div>
+            </DialogContent>
+          </Dialog>
+          <Dialog
+            open={editOpen}
+            onOpenChange={open => {
+              setEditOpen(open);
+              if (!open) resetEditMemberForm();
+            }}
+          >
+            <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+              <DialogHeader>
+                <DialogTitle>Edit {labels.entityLabel}</DialogTitle>
+              </DialogHeader>
+              <div className="grid gap-4 py-4">
+                <div className="grid gap-2">
+                  <Label>Name</Label>
+                  <Input
+                    placeholder={`${labels.entityLabel} name`}
+                    value={editMember.name}
+                    onChange={event => setEditMember(prev => ({ ...prev, name: event.target.value }))}
+                  />
+                  {editMemberFieldErrors.name && <p className="text-xs text-destructive">{editMemberFieldErrors.name}</p>}
+                </div>
+                <div className="grid gap-4 sm:grid-cols-3">
+                  <div className="grid gap-2">
+                    <Label>Country Code</Label>
+                    <Input
+                      placeholder="91"
+                      value={editMember.countryCode}
+                      onChange={event => setEditMember(prev => ({ ...prev, countryCode: event.target.value }))}
+                    />
+                    {editMemberFieldErrors.countryCode && (
+                      <p className="text-xs text-destructive">{editMemberFieldErrors.countryCode}</p>
+                    )}
+                  </div>
+                  <div className="grid gap-2 sm:col-span-2">
+                    <Label>Phone</Label>
+                    <Input
+                      placeholder="9876543210"
+                      value={editMember.phone}
+                      onChange={event => setEditMember(prev => ({ ...prev, phone: event.target.value }))}
+                    />
+                    {editMemberFieldErrors.phone && <p className="text-xs text-destructive">{editMemberFieldErrors.phone}</p>}
+                  </div>
+                </div>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="grid gap-2">
+                    <Label>Plan</Label>
+                    <Input value="Monthly" readOnly />
+                    <p className="text-xs text-muted-foreground">Plan is fixed to monthly.</p>
+                  </div>
+                  <div className="grid gap-2">
+                    <Label>{labels.feeLabel} (₹)</Label>
+                    <Input
+                      type="number"
+                      placeholder="1500"
+                      value={editMember.fee}
+                      onChange={event => setEditMember(prev => ({ ...prev, fee: event.target.value }))}
+                    />
+                    {editMemberFieldErrors.fee && <p className="text-xs text-destructive">{editMemberFieldErrors.fee}</p>}
+                  </div>
+                </div>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="grid gap-2">
+                    <Label>Next Due Date</Label>
+                    <Input
+                      type="date"
+                      value={editMember.nextDueDate}
+                      onChange={event =>
+                        setEditMember(prev => ({
+                          ...prev,
+                          nextDueDate: event.target.value,
+                        }))
+                      }
+                    />
+                    {editMemberFieldErrors.nextDueDate && (
+                      <p className="text-xs text-destructive">{editMemberFieldErrors.nextDueDate}</p>
+                    )}
+                    <p className="text-xs text-muted-foreground">
+                      Scheduled notifications are sent automatically on every month&apos;s 1st.
+                    </p>
+                  </div>
+                  <div className="grid gap-2">
+                    <Label>Status</Label>
+                    <Select value={editMember.status} onValueChange={value => setEditMember(prev => ({ ...prev, status: value as MemberStatus }))}>
+                      <SelectTrigger><SelectValue placeholder="Status" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="active">Active</SelectItem>
+                        <SelectItem value="paused">Paused</SelectItem>
+                        <SelectItem value="expired">Expired</SelectItem>
+                        <SelectItem value="blacklisted">Blacklisted</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <div className="grid gap-2">
+                  <Label>Notes</Label>
+                  <Textarea
+                    placeholder="Optional notes..."
+                    value={editMember.notes}
+                    onChange={event => setEditMember(prev => ({ ...prev, notes: event.target.value }))}
+                  />
+                </div>
+                {editMemberError && <p className="text-xs text-destructive">{editMemberError}</p>}
+                <Button className="mt-2" onClick={handleUpdateMember} disabled={updateMemberMutation.isPending}>
+                  {updateMemberMutation.isPending ? 'Saving...' : `Update ${labels.entityLabel}`}
+                </Button>
               </div>
             </DialogContent>
           </Dialog>
@@ -205,11 +710,11 @@ const GymMembers = () => {
           <Input
             placeholder="Search by name or phone..."
             className="pl-9"
-            value={search}
-            onChange={e => setSearch(e.target.value)}
+            value={table.search}
+            onChange={e => table.setSearch(e.target.value)}
           />
         </div>
-        <Select value={filterStatus} onValueChange={(v: 'all' | 'paid' | 'pending') => setFilterStatus(v)}>
+        <Select value={filterStatus} onValueChange={(v: 'all' | 'paid' | 'pending') => { setFilterStatus(v); table.setPage(1); }}>
           <SelectTrigger className="w-full sm:w-40">
             <Filter className="mr-2 h-4 w-4" />
             <SelectValue />
@@ -222,17 +727,7 @@ const GymMembers = () => {
         </Select>
       </div>
 
-      {/* Bulk Actions */}
-      {selectedIds.length > 0 && (
-        <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/50 p-3">
-          <span className="text-sm text-muted-foreground">{selectedIds.length} selected</span>
-          <Button variant="outline" size="sm"><Send className="mr-1 h-3 w-3" /> Send Reminder</Button>
-          <Button variant="outline" size="sm"><CheckCircle className="mr-1 h-3 w-3" /> Mark as Paid</Button>
-          <Button variant="outline" size="sm"><Download className="mr-1 h-3 w-3" /> Export Selected</Button>
-        </div>
-      )}
-
-      {preFiltered.length === 0 ? (
+      {!isLoading && memberList.length === 0 ? (
         <EmptyState icon={Users} title={`No ${labels.entityLabelPlural.toLowerCase()} found`} description={`No ${labels.entityLabelPlural.toLowerCase()} match your search or filter criteria.`} />
       ) : (
         <Card className="card-shadow border-0">
@@ -243,7 +738,7 @@ const GymMembers = () => {
                   <TableRow>
                     <TableHead className="w-10">
                       <Checkbox
-                        checked={selectedIds.length === preFiltered.length && preFiltered.length > 0}
+                        checked={selectedIds.length === memberList.length && memberList.length > 0}
                         onCheckedChange={toggleSelectAll}
                       />
                     </TableHead>
@@ -260,7 +755,14 @@ const GymMembers = () => {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {table.paginatedData.map(m => (
+                  {isLoading && (
+                    <TableRow>
+                      <TableCell colSpan={11} className="text-center text-muted-foreground py-8">
+                        Loading members...
+                      </TableCell>
+                    </TableRow>
+                  )}
+                  {!isLoading && memberList.map(m => (
                     <TableRow key={m.id}>
                       <TableCell>
                         <Checkbox checked={selectedIds.includes(m.id)} onCheckedChange={() => toggleSelect(m.id)} />
@@ -270,7 +772,7 @@ const GymMembers = () => {
                           {m.name}
                         </button>
                       </TableCell>
-                      <TableCell className="text-muted-foreground">{m.phone}</TableCell>
+                      <TableCell className="text-muted-foreground">{formatPhoneWithCode(m.countryCode, m.phone)}</TableCell>
                       <TableCell className="capitalize">{m.plan}</TableCell>
                       <TableCell>₹{m.fee.toLocaleString()}</TableCell>
                       <TableCell className="text-muted-foreground">{m.nextDueDate}</TableCell>
@@ -297,11 +799,22 @@ const GymMembers = () => {
                               <CheckCircle className="h-4 w-4" />
                             </Button>
                           )}
+                          {m.paymentStatus === 'pending' && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 text-primary"
+                              onClick={() => handleSendPaymentRequest(m)}
+                              disabled={sendMemberPaymentRequestMutation.isPending}
+                            >
+                              <SendHorizontal className="h-4 w-4" />
+                            </Button>
+                          )}
                           <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setProfileMember(m)}>
                             <UserCircle className="h-4 w-4" />
                           </Button>
-                          <Button variant="ghost" size="icon" className="h-8 w-8"><Pencil className="h-4 w-4" /></Button>
-                          <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive"><Trash2 className="h-4 w-4" /></Button>
+                          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleEditMember(m)}><Pencil className="h-4 w-4" /></Button>
+                          <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => handleDeleteMember(m)}><Trash2 className="h-4 w-4" /></Button>
                         </div>
                       </TableCell>
                     </TableRow>
@@ -309,7 +822,7 @@ const GymMembers = () => {
                 </TableBody>
               </Table>
             </div>
-            <TablePagination page={table.page} totalPages={table.totalPages} totalItems={table.totalFiltered} onPageChange={table.setPage} />
+            <TablePagination page={table.page} totalPages={totalPages} totalItems={totalCount} onPageChange={table.setPage} />
           </CardContent>
         </Card>
       )}
@@ -325,33 +838,52 @@ const GymMembers = () => {
               <p className="text-sm text-muted-foreground">Recording payment for <strong>{selectedMember.name}</strong></p>
               <div className="grid gap-2">
                 <Label>Amount (₹)</Label>
-                <Input type="number" defaultValue={selectedMember.fee} />
+                <Input
+                  type="number"
+                  value={paymentForm.amount}
+                  onChange={event => setPaymentForm(prev => ({ ...prev, amount: event.target.value }))}
+                />
               </div>
               <div className="grid gap-2">
                 <Label>Paid Date</Label>
-                <Input type="date" defaultValue={new Date().toISOString().split('T')[0]} />
+                <Input
+                  type="date"
+                  value={paymentForm.paidDate}
+                  onChange={event => setPaymentForm(prev => ({ ...prev, paidDate: event.target.value }))}
+                />
               </div>
               <div className="grid gap-2">
                 <Label>Payment Method</Label>
-                <Select defaultValue="cash">
+                <Select
+                  value={paymentForm.method}
+                  onValueChange={value => setPaymentForm(prev => ({ ...prev, method: value }))}
+                >
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="cash">Cash</SelectItem>
-                    <SelectItem value="upi">UPI</SelectItem>
-                    <SelectItem value="card">Card</SelectItem>
-                    <SelectItem value="online">Online</SelectItem>
+                    {paymentMethods.map(method => (
+                      <SelectItem key={method} value={method}>{method.toUpperCase()}</SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
               <div className="flex items-center gap-2">
-                <Switch id="partial" />
+                <Switch
+                  id="partial"
+                  checked={paymentForm.isPartial}
+                  onCheckedChange={value => setPaymentForm(prev => ({ ...prev, isPartial: Boolean(value) }))}
+                />
                 <Label htmlFor="partial">Partial Payment</Label>
               </div>
               <div className="grid gap-2">
                 <Label>Transaction Note (optional)</Label>
-                <Textarea placeholder="Payment notes..." />
+                <Textarea
+                  placeholder="Payment notes..."
+                  value={paymentForm.notes}
+                  onChange={event => setPaymentForm(prev => ({ ...prev, notes: event.target.value }))}
+                />
               </div>
-              <Button variant="success" onClick={confirmPayment}>
+              {paymentError && <p className="text-xs text-destructive">{paymentError}</p>}
+              <Button variant="success" onClick={confirmPayment} disabled={paymentMutation.isPending}>
                 <CheckCircle className="mr-2 h-4 w-4" /> Confirm Payment
               </Button>
             </div>
@@ -373,7 +905,7 @@ const GymMembers = () => {
                 </div>
                 <div>
                   <p className="text-lg font-semibold text-foreground">{profileMember.name}</p>
-                  <p className="text-sm text-muted-foreground">{profileMember.phone}</p>
+                  <p className="text-sm text-muted-foreground">{formatPhoneWithCode(profileMember.countryCode, profileMember.phone)}</p>
                 </div>
               </div>
 
@@ -409,6 +941,9 @@ const GymMembers = () => {
                     <div className="rounded-lg bg-muted/50 p-3">
                       <p className="text-xs text-muted-foreground">Next Due</p>
                       <p className="text-sm font-medium text-foreground">{profileMember.nextDueDate}</p>
+                      <p className="mt-1 text-[11px] text-muted-foreground">
+                        Scheduled notifications go on every month&apos;s 1st.
+                      </p>
                     </div>
                   </div>
                   {profileMember.notes && (
@@ -451,7 +986,7 @@ const GymMembers = () => {
                 </TabsContent>
 
                 <TabsContent value="upi" className="space-y-4 mt-4">
-                  {currentGym.upiId ? (
+                  {currentGym?.upiId ? (
                     <div className="space-y-3">
                       <p className="text-sm font-medium text-foreground">Payment Link Preview</p>
                       <div className="rounded-lg border border-border p-3">
@@ -460,9 +995,6 @@ const GymMembers = () => {
                       <div className="flex gap-2">
                         <Button variant="outline" size="sm" onClick={() => navigator.clipboard.writeText(generateUpiLink(profileMember))}>
                           <Copy className="mr-1 h-3 w-3" /> Copy Link
-                        </Button>
-                        <Button variant="outline" size="sm">
-                          <MessageSquare className="mr-1 h-3 w-3" /> Send via WhatsApp
                         </Button>
                       </div>
                     </div>

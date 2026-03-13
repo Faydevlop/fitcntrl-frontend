@@ -1,84 +1,197 @@
-import React, { createContext, useContext, useState, useCallback } from 'react';
-import type { UserRole } from '@/data/mockData';
-import type { BusinessType } from '@/data/businessTypes';
+import React, { createContext, useCallback, useContext, useEffect, useState } from "react";
+import type { BusinessType } from "@/data/businessTypes";
+import { AUTH_USER_KEY, clearAuthTokens, getAccessToken } from "@/lib/api";
+import { ApiError } from "@/lib/api";
+import { authApi } from "@/services/api";
+import { useAppDispatch } from "@/store/hooks";
+import { clearProfile, fetchProfile, setProfile } from "@/store/app.slice";
 
 interface User {
+  id: string;
   email: string;
-  role: UserRole;
+  role: "admin" | "gym_owner";
   name: string;
-  gymId?: string;
+  gymId?: string | null;
+  currentPlanId?: string | null;
+  countryCode?: string;
   phone?: string;
+  platformType?: BusinessType | null;
   businessType?: BusinessType;
-  businessName?: string;
   onboardingComplete?: boolean;
+  lastLoginAt?: string | null;
 }
+
+type ActionResult = {
+  success: boolean;
+  message?: string;
+};
 
 interface AuthContextType {
   user: User | null;
-  login: (email: string, password: string) => boolean;
-  signup: (name: string, email: string, phone: string, password: string) => boolean;
-  logout: () => void;
-  completeOnboarding: (businessType: BusinessType, businessName: string) => void;
   isAuthenticated: boolean;
+  isInitializing: boolean;
+  login: (email: string, password: string) => Promise<ActionResult>;
+  signup: (
+    name: string,
+    email: string,
+    countryCode: string,
+    phone: string,
+    password: string,
+  ) => Promise<ActionResult>;
+  logout: () => void;
+  refreshProfile: () => Promise<void>;
+  completeOnboarding: (
+    platformType: BusinessType,
+    businessName: string,
+    details?: {
+      ownerName?: string;
+      phone?: string;
+      city?: string;
+      address?: string;
+      upiId?: string;
+      displayName?: string;
+    },
+  ) => Promise<ActionResult>;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
 
-const MOCK_USERS: Record<string, User & { password: string }> = {
-  'admin@gymflow.com': { email: 'admin@gymflow.com', password: 'admin123', role: 'admin', name: 'Admin User', onboardingComplete: true },
-  'owner@gymflow.com': { email: 'owner@gymflow.com', password: 'owner123', role: 'gym_owner', name: 'Rahul Sharma', gymId: '1', businessType: 'gym', businessName: 'FitZone Gym', onboardingComplete: true },
-  'yoga@gymflow.com': { email: 'yoga@gymflow.com', password: 'yoga123', role: 'gym_owner', name: 'Priya Patel', gymId: '2', businessType: 'yoga', businessName: 'Serene Yoga Studio', onboardingComplete: true },
-  'dance@gymflow.com': { email: 'dance@gymflow.com', password: 'dance123', role: 'gym_owner', name: 'Ananya Joshi', gymId: '7', businessType: 'dance', businessName: 'Rhythm Dance Academy', onboardingComplete: true },
+const getSavedUser = (): User | null => {
+  const raw = localStorage.getItem(AUTH_USER_KEY);
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as User;
+  } catch {
+    return null;
+  }
+};
+
+const saveUser = (user: User | null) => {
+  if (!user) {
+    localStorage.removeItem(AUTH_USER_KEY);
+    return;
+  }
+  localStorage.setItem(AUTH_USER_KEY, JSON.stringify(user));
+};
+
+const messageFromError = (error: unknown): string => {
+  if (error instanceof ApiError) return error.message;
+  if (error instanceof Error) return error.message;
+  return "Something went wrong. Please try again.";
 };
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [user, setUser] = useState<User | null>(() => {
-    const saved = localStorage.getItem('gymflow_user');
-    return saved ? JSON.parse(saved) : null;
-  });
+  const dispatch = useAppDispatch();
+  const [user, setUser] = useState<User | null>(getSavedUser);
+  const [isInitializing, setIsInitializing] = useState(Boolean(getAccessToken()));
 
-  const login = useCallback((email: string, password: string) => {
-    const mockUser = MOCK_USERS[email];
-    if (mockUser && mockUser.password === password) {
-      const { password: _, ...userData } = mockUser;
-      setUser(userData);
-      localStorage.setItem('gymflow_user', JSON.stringify(userData));
-      return true;
+  const setUserAndPersist = useCallback((nextUser: User | null) => {
+    setUser(nextUser);
+    saveUser(nextUser);
+    dispatch(setProfile(nextUser));
+  }, [dispatch]);
+
+  const refreshProfile = useCallback(async () => {
+    const profile = await dispatch(fetchProfile()).unwrap();
+    setUserAndPersist(profile);
+  }, [dispatch, setUserAndPersist]);
+
+  useEffect(() => {
+    const token = getAccessToken();
+    if (!token) {
+      setIsInitializing(false);
+      return;
     }
-    return false;
-  }, []);
 
-  const signup = useCallback((name: string, email: string, phone: string, _password: string) => {
-    if (MOCK_USERS[email]) return false;
-    const newUser: User = {
-      email,
-      role: 'gym_owner',
-      name,
-      phone,
-      gymId: String(Date.now()),
-      onboardingComplete: false,
-    };
-    setUser(newUser);
-    localStorage.setItem('gymflow_user', JSON.stringify(newUser));
-    return true;
-  }, []);
+    refreshProfile()
+      .catch(() => {
+        clearAuthTokens();
+        setUserAndPersist(null);
+      })
+      .finally(() => setIsInitializing(false));
+  }, [refreshProfile, setUserAndPersist]);
 
-  const completeOnboarding = useCallback((businessType: BusinessType, businessName: string) => {
-    setUser(prev => {
-      if (!prev) return prev;
-      const updated = { ...prev, businessType, businessName, onboardingComplete: true };
-      localStorage.setItem('gymflow_user', JSON.stringify(updated));
-      return updated;
-    });
-  }, []);
+  const login = useCallback(async (email: string, password: string): Promise<ActionResult> => {
+    try {
+      const nextUser = await authApi.login({ email, password });
+      setUserAndPersist(nextUser);
+      return { success: true };
+    } catch (error) {
+      return { success: false, message: messageFromError(error) };
+    }
+  }, [setUserAndPersist]);
+
+  const signup = useCallback(
+    async (
+      name: string,
+      email: string,
+      countryCode: string,
+      phone: string,
+      password: string,
+    ): Promise<ActionResult> => {
+      try {
+        const nextUser = await authApi.signup({ name, email, countryCode, phone, password });
+        setUserAndPersist(nextUser);
+        return { success: true };
+      } catch (error) {
+        return { success: false, message: messageFromError(error) };
+      }
+    },
+    [setUserAndPersist],
+  );
+
+  const completeOnboarding = useCallback(
+    async (
+      platformType: BusinessType,
+      businessName: string,
+      details?: {
+        ownerName?: string;
+        phone?: string;
+        city?: string;
+        address?: string;
+        upiId?: string;
+        displayName?: string;
+      },
+    ): Promise<ActionResult> => {
+      try {
+        const nextUser = await authApi.onboarding({
+          platformType,
+          businessName,
+          ownerName: details?.ownerName || user?.name || "",
+          phone: details?.phone || user?.phone || "",
+          city: details?.city,
+          address: details?.address,
+          upiId: details?.upiId,
+          displayName: details?.displayName,
+        });
+        setUserAndPersist(nextUser);
+        return { success: true };
+      } catch (error) {
+        return { success: false, message: messageFromError(error) };
+      }
+    },
+    [setUserAndPersist, user?.name, user?.phone],
+  );
 
   const logout = useCallback(() => {
-    setUser(null);
-    localStorage.removeItem('gymflow_user');
-  }, []);
+    clearAuthTokens();
+    setUserAndPersist(null);
+    dispatch(clearProfile());
+  }, [dispatch, setUserAndPersist]);
 
   return (
-    <AuthContext.Provider value={{ user, login, signup, logout, completeOnboarding, isAuthenticated: !!user }}>
+    <AuthContext.Provider
+      value={{
+        user,
+        login,
+        signup,
+        logout,
+        refreshProfile,
+        completeOnboarding,
+        isAuthenticated: Boolean(user && getAccessToken()),
+        isInitializing,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );
@@ -86,6 +199,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
 export const useAuth = () => {
   const ctx = useContext(AuthContext);
-  if (!ctx) throw new Error('useAuth must be used within AuthProvider');
+  if (!ctx) throw new Error("useAuth must be used within AuthProvider");
   return ctx;
 };

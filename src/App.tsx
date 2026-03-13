@@ -2,8 +2,14 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { Provider } from "react-redux";
+import { useEffect } from "react";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "@/contexts/AuthContext";
+import { fetchConstants, fetchProfile } from "@/store/app.slice";
+import { store } from "@/store";
+import { useAppDispatch } from "@/store/hooks";
+import { getAccessToken } from "@/lib/api";
 import NotFound from "./pages/NotFound";
 import DashboardLayout from "./layouts/DashboardLayout";
 import PublicLayout from "./layouts/PublicLayout";
@@ -37,56 +43,73 @@ import GymSupport from "./pages/gym/Support";
 
 const queryClient = new QueryClient();
 
-const App = () => (
-  <QueryClientProvider client={queryClient}>
-    <TooltipProvider>
-      <Toaster />
-      <Sonner />
-      <AuthProvider>
-        <BrowserRouter>
-          <Routes>
-            {/* Public routes */}
-            <Route element={<PublicLayout />}>
-              <Route path="/" element={<Home />} />
-              <Route path="/features" element={<Features />} />
-              <Route path="/pricing" element={<Pricing />} />
-              <Route path="/contact" element={<Contact />} />
-            </Route>
-            <Route path="/login" element={<Login />} />
-            <Route path="/signup" element={<Signup />} />
-            <Route path="/onboarding" element={<Onboarding />} />
-            <Route path="/forgot-password" element={<ForgotPassword />} />
-            <Route path="/verify-code" element={<VerifyCode />} />
-            <Route path="/reset-password" element={<ResetPassword />} />
+const AppBootstrap = () => {
+  const dispatch = useAppDispatch();
 
-            {/* Protected routes */}
-            <Route path="/admin" element={<DashboardLayout />}>
-              <Route index element={<AdminDashboard />} />
-              <Route path="gyms" element={<AdminGyms />} />
-              <Route path="plans" element={<AdminPlans />} />
-              <Route path="subscriptions" element={<AdminSubscriptions />} />
-              <Route path="usage" element={<AdminUsage />} />
-              <Route path="announcements" element={<AdminAnnouncements />} />
-              <Route path="activity-logs" element={<AdminActivityLogs />} />
-              <Route path="whatsapp-phones" element={<AdminWhatsAppPhones />} />
-              <Route path="enquiries" element={<AdminEnquiries />} />
-              <Route path="owner-support" element={<AdminOwnerSupport />} />
-              <Route path="settings" element={<AdminSettings />} />
-            </Route>
-            <Route path="/gym" element={<DashboardLayout />}>
-              <Route index element={<GymDashboard />} />
-              <Route path="members" element={<GymMembers />} />
-              <Route path="payments" element={<GymPayments />} />
-              <Route path="billing" element={<GymBilling />} />
-              <Route path="support" element={<GymSupport />} />
-              <Route path="settings" element={<GymSettings />} />
-            </Route>
-            <Route path="*" element={<NotFound />} />
-          </Routes>
-        </BrowserRouter>
-      </AuthProvider>
-    </TooltipProvider>
-  </QueryClientProvider>
+  useEffect(() => {
+    dispatch(fetchConstants());
+    if (getAccessToken()) {
+      dispatch(fetchProfile());
+    }
+  }, [dispatch]);
+
+  return null;
+};
+
+const App = () => (
+  <Provider store={store}>
+    <QueryClientProvider client={queryClient}>
+      <TooltipProvider>
+        <Toaster />
+        <Sonner />
+        <AuthProvider>
+          <AppBootstrap />
+          <BrowserRouter>
+            <Routes>
+              {/* Public routes */}
+              <Route element={<PublicLayout />}>
+                <Route path="/" element={<Home />} />
+                <Route path="/features" element={<Features />} />
+                <Route path="/pricing" element={<Pricing />} />
+                <Route path="/contact" element={<Contact />} />
+              </Route>
+              <Route path="/login" element={<Login />} />
+              <Route path="/signin" element={<Login />} />
+              <Route path="/signup" element={<Signup />} />
+              <Route path="/onboarding" element={<Onboarding />} />
+              <Route path="/forgot-password" element={<ForgotPassword />} />
+              <Route path="/verify-code" element={<VerifyCode />} />
+              <Route path="/reset-password" element={<ResetPassword />} />
+
+              {/* Protected routes */}
+              <Route path="/admin" element={<DashboardLayout />}>
+                <Route index element={<AdminDashboard />} />
+                <Route path="gyms" element={<AdminGyms />} />
+                <Route path="plans" element={<AdminPlans />} />
+                <Route path="subscriptions" element={<AdminSubscriptions />} />
+                <Route path="usage" element={<AdminUsage />} />
+                <Route path="announcements" element={<AdminAnnouncements />} />
+                <Route path="activity-logs" element={<AdminActivityLogs />} />
+                <Route path="whatsapp-phones" element={<AdminWhatsAppPhones />} />
+                <Route path="enquiries" element={<AdminEnquiries />} />
+                <Route path="owner-support" element={<AdminOwnerSupport />} />
+                <Route path="settings" element={<AdminSettings />} />
+              </Route>
+              <Route path="/gym" element={<DashboardLayout />}>
+                <Route index element={<GymDashboard />} />
+                <Route path="members" element={<GymMembers />} />
+                <Route path="payments" element={<GymPayments />} />
+                <Route path="billing" element={<GymBilling />} />
+                <Route path="support" element={<GymSupport />} />
+                <Route path="settings" element={<GymSettings />} />
+              </Route>
+              <Route path="*" element={<NotFound />} />
+            </Routes>
+          </BrowserRouter>
+        </AuthProvider>
+      </TooltipProvider>
+    </QueryClientProvider>
+  </Provider>
 );
 
 export default App;

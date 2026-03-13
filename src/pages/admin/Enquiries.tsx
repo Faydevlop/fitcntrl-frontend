@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
@@ -6,9 +6,12 @@ import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Phone, Eye, CheckCircle2, XCircle } from 'lucide-react';
-import { enquiries, type Enquiry, type EnquiryStatus } from '@/data/enquiryData';
-import { useTableControls } from '@/hooks/useTableControls';
+import { type Enquiry, type EnquiryStatus } from '@/data/enquiryData';
 import { TableSearchBar, SortableHeader, TablePagination } from '@/components/TableControls';
+import { useServerTableControls } from '@/hooks/useServerTableControls';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { adminApi } from '@/services/api';
+import TablePageSkeleton from '@/components/loaders/TablePageSkeleton';
 
 const statusColors: Record<EnquiryStatus, string> = {
   new: 'bg-primary/10 text-primary hover:bg-primary/20',
@@ -16,25 +19,62 @@ const statusColors: Record<EnquiryStatus, string> = {
   closed: 'bg-success/10 text-success hover:bg-success/20',
 };
 
+const mapEnquiry = (row: any): Enquiry => ({
+  id: String(row?._id || row?.id || ''),
+  name: String(row?.name || ''),
+  phone: String(row?.phone || ''),
+  email: String(row?.email || ''),
+  gymName: String(row?.gymName || ''),
+  city: String(row?.city || ''),
+  membersCount: String(row?.membersCount || '-'),
+  message: String(row?.message || ''),
+  date: row?.createdAt ? new Date(row.createdAt).toISOString().split('T')[0] : '-',
+  status: row?.status === 'contacted' ? 'contacted' : row?.status === 'closed' ? 'closed' : 'new',
+});
+
 const Enquiries = () => {
-  const [data, setData] = useState<Enquiry[]>([...enquiries]);
+  const queryClient = useQueryClient();
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [selected, setSelected] = useState<Enquiry | null>(null);
 
-  const filteredByStatus = statusFilter === 'all' ? data : data.filter(e => e.status === statusFilter);
-
-  const table = useTableControls({
-    data: filteredByStatus,
+  const table = useServerTableControls({
     searchFields: ['name', 'phone', 'email', 'gymName', 'city'],
     pageSize: 10,
+    sortKeyMap: {
+      date: 'createdAt',
+    },
+  });
+
+  const { data, isLoading } = useQuery({
+    queryKey: ['admin-enquiries', table.search, table.sort, table.page, statusFilter],
+    queryFn: () =>
+      adminApi.listEnquiries(
+        table.toPayload(statusFilter === 'all' ? {} : { status: statusFilter }),
+      ),
+  });
+
+  const tableRows = useMemo(() => (data?.tableData || []).map(mapEnquiry), [data]);
+  const totalCount = data?.totalCount || 0;
+  const totalPages = Math.max(1, Math.ceil(totalCount / table.pageSize));
+
+  const updateStatusMutation = useMutation({
+    mutationFn: ({ id, status }: { id: string; status: EnquiryStatus }) =>
+      adminApi.updateEnquiry(id, { status }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin-enquiries'] });
+    },
   });
 
   const updateStatus = (id: string, status: EnquiryStatus) => {
-    setData(prev => prev.map(e => e.id === id ? { ...e, status } : e));
-    const idx = enquiries.findIndex(e => e.id === id);
-    if (idx >= 0) enquiries[idx].status = status;
-    if (selected?.id === id) setSelected(s => s ? { ...s, status } : null);
+    if (selected?.id === id) {
+      setSelected(prev => (prev ? { ...prev, status } : prev));
+    }
+    updateStatusMutation.mutate({ id, status });
   };
+
+  if (isLoading && !data) {
+    return <TablePageSkeleton columns={9} />;
+  }
 
   return (
     <div className="space-y-6">
@@ -45,7 +85,7 @@ const Enquiries = () => {
 
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
         <TableSearchBar value={table.search} onChange={table.setSearch} placeholder="Search enquiries..." />
-        <Select value={statusFilter} onValueChange={setStatusFilter}>
+        <Select value={statusFilter} onValueChange={value => { setStatusFilter(value); table.setPage(1); }}>
           <SelectTrigger className="w-40">
             <SelectValue placeholder="Filter by status" />
           </SelectTrigger>
@@ -76,7 +116,10 @@ const Enquiries = () => {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {table.paginatedData.map(e => (
+                {isLoading && (
+                  <TableRow><TableCell colSpan={9} className="py-8 text-center text-muted-foreground">Loading enquiries...</TableCell></TableRow>
+                )}
+                {!isLoading && tableRows.map(e => (
                   <TableRow key={e.id}>
                     <TableCell className="font-medium">{e.name}</TableCell>
                     <TableCell>{e.phone}</TableCell>
@@ -95,13 +138,13 @@ const Enquiries = () => {
                     </TableCell>
                   </TableRow>
                 ))}
-                {table.paginatedData.length === 0 && (
+                {!isLoading && tableRows.length === 0 && (
                   <TableRow><TableCell colSpan={9} className="py-8 text-center text-muted-foreground">No enquiries found.</TableCell></TableRow>
                 )}
               </TableBody>
             </Table>
           </div>
-          <TablePagination page={table.page} totalPages={table.totalPages} totalItems={table.totalFiltered} onPageChange={table.setPage} />
+          <TablePagination page={table.page} totalPages={totalPages} totalItems={totalCount} onPageChange={table.setPage} />
         </CardContent>
       </Card>
 

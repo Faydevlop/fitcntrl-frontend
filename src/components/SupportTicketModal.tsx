@@ -4,7 +4,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Send, User, ShieldCheck } from 'lucide-react';
-import type { SupportTicket, SupportTicketStatus } from '@/data/supportData';
+import type { SupportTicket, SupportTicketStatus } from '@/types/support';
 
 const statusColors: Record<SupportTicketStatus, string> = {
   open: 'bg-destructive/10 text-destructive hover:bg-destructive/20',

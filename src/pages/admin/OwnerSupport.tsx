@@ -1,15 +1,17 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Eye, Play, CheckCircle2, MessageSquare } from 'lucide-react';
-import { supportTickets, type SupportTicket, type SupportTicketStatus } from '@/data/supportData';
-import { gyms } from '@/data/mockData';
-import { useTableControls } from '@/hooks/useTableControls';
+import { type SupportTicket, type SupportTicketStatus } from '@/types/support';
 import { TableSearchBar, SortableHeader, TablePagination } from '@/components/TableControls';
 import SupportTicketModal from '@/components/SupportTicketModal';
+import { useServerTableControls } from '@/hooks/useServerTableControls';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { adminApi } from '@/services/api';
+import TablePageSkeleton from '@/components/loaders/TablePageSkeleton';
 
 const statusColors: Record<SupportTicketStatus, string> = {
   open: 'bg-destructive/10 text-destructive hover:bg-destructive/20',
@@ -23,32 +25,82 @@ const statusLabels: Record<SupportTicketStatus, string> = {
   resolved: 'Resolved',
 };
 
+const mapTicket = (row: any): SupportTicket => ({
+  id: String(row?._id || row?.id || ''),
+  gymId: String(row?.gymId || ''),
+  gymName: String(row?.gymName || row?.gymId || '-'),
+  ownerName: String(row?.ownerName || row?.ownerUserId || '-'),
+  ownerPhone: String(row?.ownerPhone || '-'),
+  message: String(row?.message || row?.subject || ''),
+  createdDate: row?.createdAt ? new Date(row.createdAt).toISOString().split('T')[0] : '-',
+  lastUpdated: row?.lastUpdatedAt ? new Date(row.lastUpdatedAt).toISOString().split('T')[0] : '-',
+  status: row?.status === 'in_progress' ? 'in_progress' : row?.status === 'resolved' ? 'resolved' : 'open',
+  replies: Array.isArray(row?.replies)
+    ? row.replies.map((reply: any, index: number) => ({
+      id: String(reply?.id || `${row?._id || 'r'}-${index}`),
+      sender: reply?.sender === 'admin' ? 'admin' : 'owner',
+      senderName: String(reply?.senderName || (reply?.sender === 'admin' ? 'Admin' : 'Owner')),
+      message: String(reply?.message || ''),
+      timestamp: reply?.timestamp
+        ? new Date(reply.timestamp).toLocaleString('en-IN')
+        : '-',
+    }))
+    : [],
+});
+
 const AdminOwnerSupport = () => {
-  const [data, setData] = useState<SupportTicket[]>([...supportTickets]);
+  const queryClient = useQueryClient();
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [gymFilter, setGymFilter] = useState<string>('all');
   const [selected, setSelected] = useState<SupportTicket | null>(null);
 
-  const filtered = data
-    .filter(t => statusFilter === 'all' || t.status === statusFilter)
-    .filter(t => gymFilter === 'all' || t.gymId === gymFilter);
-
-  const table = useTableControls({
-    data: filtered,
+  const table = useServerTableControls({
     searchFields: ['id', 'gymName', 'ownerName', 'ownerPhone', 'message'],
     pageSize: 10,
+    sortKeyMap: {
+      id: '_id',
+      gymName: 'gymId',
+      createdDate: 'createdAt',
+      lastUpdated: 'lastUpdatedAt',
+    },
   });
 
-  const uniqueGyms = [...new Map(data.map(t => [t.gymId, { id: t.gymId, name: t.gymName }])).values()];
+  const { data, isLoading } = useQuery({
+    queryKey: ['admin-owner-support', table.search, table.sort, table.page, statusFilter, gymFilter],
+    queryFn: () =>
+      adminApi.listOwnerSupport(
+        table.toPayload({
+          ...(statusFilter === 'all' ? {} : { status: statusFilter }),
+          ...(gymFilter === 'all' ? {} : { gymId: gymFilter }),
+        }),
+      ),
+  });
+
+  const rows = useMemo(() => (data?.tableData || []).map(mapTicket), [data]);
+
+  const uniqueGyms = [...new Map(rows.map(t => [t.gymId, { id: t.gymId, name: t.gymName }])).values()];
+  const totalCount = data?.totalCount || 0;
+  const totalPages = Math.max(1, Math.ceil(totalCount / table.pageSize));
+
+  const updateSupportMutation = useMutation({
+    mutationFn: (payload: { id: string; status?: SupportTicketStatus; replyMessage?: string }) =>
+      adminApi.updateOwnerSupport(payload.id, {
+        status: payload.status,
+        replyMessage: payload.replyMessage,
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin-owner-support'] });
+    },
+  });
 
   const handleStatusChange = (ticketId: string, status: SupportTicketStatus) => {
-    const now = new Date().toISOString().split('T')[0];
-    setData(prev => prev.map(t => t.id === ticketId ? { ...t, status, lastUpdated: now } : t));
-    if (selected?.id === ticketId) setSelected(s => s ? { ...s, status, lastUpdated: now } : null);
+    if (selected?.id === ticketId) {
+      setSelected(prev => (prev ? { ...prev, status } : prev));
+    }
+    updateSupportMutation.mutate({ id: ticketId, status });
   };
 
   const handleReply = (ticketId: string, message: string) => {
-    const now = new Date().toISOString().split('T')[0];
     const newReply = {
       id: `r-${Date.now()}`,
       sender: 'admin' as const,
@@ -56,9 +108,15 @@ const AdminOwnerSupport = () => {
       message,
       timestamp: new Date().toLocaleString('en-IN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: true }),
     };
-    setData(prev => prev.map(t => t.id === ticketId ? { ...t, replies: [...t.replies, newReply], lastUpdated: now } : t));
-    if (selected?.id === ticketId) setSelected(s => s ? { ...s, replies: [...s.replies, newReply], lastUpdated: now } : null);
+    if (selected?.id === ticketId) {
+      setSelected(prev => (prev ? { ...prev, replies: [...prev.replies, newReply] } : prev));
+    }
+    updateSupportMutation.mutate({ id: ticketId, replyMessage: message });
   };
+
+  if (isLoading && !data) {
+    return <TablePageSkeleton columns={8} />;
+  }
 
   return (
     <div className="space-y-6">
@@ -69,7 +127,7 @@ const AdminOwnerSupport = () => {
 
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
         <TableSearchBar value={table.search} onChange={table.setSearch} placeholder="Search tickets..." />
-        <Select value={statusFilter} onValueChange={setStatusFilter}>
+        <Select value={statusFilter} onValueChange={value => { setStatusFilter(value); table.setPage(1); }}>
           <SelectTrigger className="w-40">
             <SelectValue placeholder="Status" />
           </SelectTrigger>
@@ -80,7 +138,7 @@ const AdminOwnerSupport = () => {
             <SelectItem value="resolved">Resolved</SelectItem>
           </SelectContent>
         </Select>
-        <Select value={gymFilter} onValueChange={setGymFilter}>
+        <Select value={gymFilter} onValueChange={value => { setGymFilter(value); table.setPage(1); }}>
           <SelectTrigger className="w-44">
             <SelectValue placeholder="Gym" />
           </SelectTrigger>
@@ -110,7 +168,10 @@ const AdminOwnerSupport = () => {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {table.paginatedData.map(t => (
+                {isLoading && (
+                  <TableRow><TableCell colSpan={8} className="py-8 text-center text-muted-foreground">Loading support tickets...</TableCell></TableRow>
+                )}
+                {!isLoading && rows.map(t => (
                   <TableRow key={t.id} className="cursor-pointer hover:bg-muted/50" onClick={() => setSelected(t)}>
                     <TableCell className="font-medium">{t.id}</TableCell>
                     <TableCell>{t.gymName}</TableCell>
@@ -132,13 +193,13 @@ const AdminOwnerSupport = () => {
                     </TableCell>
                   </TableRow>
                 ))}
-                {table.paginatedData.length === 0 && (
+                {!isLoading && rows.length === 0 && (
                   <TableRow><TableCell colSpan={8} className="py-8 text-center text-muted-foreground">No support tickets found.</TableCell></TableRow>
                 )}
               </TableBody>
             </Table>
           </div>
-          <TablePagination page={table.page} totalPages={table.totalPages} totalItems={table.totalFiltered} onPageChange={table.setPage} />
+          <TablePagination page={table.page} totalPages={totalPages} totalItems={totalCount} onPageChange={table.setPage} />
         </CardContent>
       </Card>
 

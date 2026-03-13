@@ -1,43 +1,73 @@
 import { useState } from 'react';
 import { Navigate, Link, useNavigate } from 'react-router-dom';
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { z } from 'zod';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Dumbbell, UserPlus } from 'lucide-react';
+import AuthPageSkeleton from '@/components/loaders/AuthPageSkeleton';
+
+const signupSchema = z.object({
+  name: z.string().min(2, 'Name must be at least 2 characters'),
+  email: z.string().email('Enter a valid email'),
+  countryCode: z.string().regex(/^\d{1,4}$/, 'Use country code like 91'),
+  phone: z.string().min(6, 'Enter a valid phone number'),
+  password: z.string().min(8, 'Password must be at least 8 characters'),
+  confirmPassword: z.string().min(8, 'Confirm password is required'),
+}).refine(values => values.password === values.confirmPassword, {
+  message: 'Passwords do not match',
+  path: ['confirmPassword'],
+});
+
+type SignupForm = z.infer<typeof signupSchema>;
 
 const Signup = () => {
-  const { isAuthenticated, user, signup } = useAuth();
+  const { isAuthenticated, user, signup, isInitializing } = useAuth();
   const navigate = useNavigate();
-  const [name, setName] = useState('');
-  const [email, setEmail] = useState('');
-  const [phone, setPhone] = useState('');
-  const [password, setPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+  const { register, handleSubmit, formState: { errors } } = useForm<SignupForm>({
+    resolver: zodResolver(signupSchema),
+    defaultValues: {
+      name: '',
+      email: '',
+      countryCode: '91',
+      phone: '',
+      password: '',
+      confirmPassword: '',
+    },
+  });
 
-  if (isAuthenticated && user) {
-    return <Navigate to={user.role === 'admin' ? '/admin' : '/gym'} replace />;
+  if (isInitializing) {
+    return <AuthPageSkeleton />;
   }
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
+  if (isAuthenticated && user) {
+    if (user.role === 'admin') return <Navigate to="/admin" replace />;
+    if (!user.onboardingComplete) return <Navigate to="/onboarding" replace />;
+    return <Navigate to="/gym" replace />;
+  }
+
+  const onSubmit = async (values: SignupForm) => {
     setError('');
-    if (password !== confirmPassword) {
-      setError('Passwords do not match');
-      return;
-    }
-    if (password.length < 6) {
-      setError('Password must be at least 6 characters');
-      return;
-    }
-    const success = signup(name, email, phone, password);
-    if (success) {
+    setLoading(true);
+    const result = await signup(
+      values.name,
+      values.email,
+      values.countryCode,
+      values.phone,
+      values.password,
+    );
+    setLoading(false);
+    if (result.success) {
       navigate('/onboarding');
-    } else {
-      setError('Email already registered');
+      return;
     }
+    setError(result.message || 'Email already registered');
   };
 
   return (
@@ -52,7 +82,7 @@ const Signup = () => {
             Start managing your<br />business today.
           </h1>
           <p className="mt-4 max-w-md text-lg text-primary-foreground/70">
-            Gym, yoga, dance, fitness — one platform for all. Sign up and set up in minutes.
+            Gym, yoga, dance, fitness - one platform for all. Sign up and set up in minutes.
           </p>
         </div>
         <p className="text-sm text-primary-foreground/50">© 2025 FitCntrl. All rights reserved.</p>
@@ -68,37 +98,48 @@ const Signup = () => {
             <p className="text-sm text-muted-foreground">Start your free trial today</p>
           </CardHeader>
           <CardContent>
-            <form onSubmit={handleSubmit} className="space-y-4">
+            <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
               <div className="space-y-2">
                 <Label htmlFor="name">Full Name</Label>
-                <Input id="name" placeholder="Your name" value={name} onChange={e => setName(e.target.value)} required />
+                <Input id="name" placeholder="Your name" {...register('name')} />
+                {errors.name && <p className="text-xs text-destructive">{errors.name.message}</p>}
               </div>
               <div className="space-y-2">
                 <Label htmlFor="email">Email</Label>
-                <Input id="email" type="email" placeholder="you@example.com" value={email} onChange={e => setEmail(e.target.value)} required />
+                <Input id="email" type="email" placeholder="you@example.com" {...register('email')} />
+                {errors.email && <p className="text-xs text-destructive">{errors.email.message}</p>}
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="phone">Phone</Label>
-                <Input id="phone" placeholder="+91 XXXXX XXXXX" value={phone} onChange={e => setPhone(e.target.value)} required />
+              <div className="grid gap-4 sm:grid-cols-3">
+                <div className="space-y-2">
+                  <Label htmlFor="countryCode">Country Code</Label>
+                  <Input id="countryCode" placeholder="91" {...register('countryCode')} />
+                  {errors.countryCode && <p className="text-xs text-destructive">{errors.countryCode.message}</p>}
+                </div>
+                <div className="space-y-2 sm:col-span-2">
+                  <Label htmlFor="phone">Phone</Label>
+                  <Input id="phone" placeholder="9876543210" {...register('phone')} />
+                  {errors.phone && <p className="text-xs text-destructive">{errors.phone.message}</p>}
+                </div>
               </div>
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-2">
                   <Label htmlFor="password">Password</Label>
-                  <Input id="password" type="password" placeholder="••••••••" value={password} onChange={e => setPassword(e.target.value)} required />
+                  <Input id="password" type="password" placeholder="••••••••" {...register('password')} />
+                  {errors.password && <p className="text-xs text-destructive">{errors.password.message}</p>}
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="confirm">Confirm Password</Label>
-                  <Input id="confirm" type="password" placeholder="••••••••" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} required />
+                  <Input id="confirm" type="password" placeholder="••••••••" {...register('confirmPassword')} />
+                  {errors.confirmPassword && <p className="text-xs text-destructive">{errors.confirmPassword.message}</p>}
                 </div>
               </div>
               {error && <p className="text-sm text-destructive">{error}</p>}
-              <Button type="submit" className="w-full" size="lg">
-                <UserPlus className="mr-2 h-4 w-4" /> Sign Up
+              <Button type="submit" className="w-full" size="lg" disabled={loading}>
+                <UserPlus className="mr-2 h-4 w-4" /> {loading ? 'Creating account...' : 'Sign Up'}
               </Button>
             </form>
             <p className="mt-4 text-center text-sm text-muted-foreground">
-              Already have an account?{' '}
-              <Link to="/login" className="text-primary hover:underline">Sign in</Link>
+              Already have an account? <Link to="/login" className="text-primary hover:underline">Sign in</Link>
             </p>
           </CardContent>
         </Card>

@@ -20,11 +20,11 @@ const AdminSettings = () => {
         <CardContent className="space-y-4">
           <div className="grid gap-2">
             <Label>Platform Name</Label>
-            <Input defaultValue="GymFlow" />
+            <Input defaultValue="fitcntrl" />
           </div>
           <div className="grid gap-2">
             <Label>Admin Email</Label>
-            <Input defaultValue="admin@gymflow.com" />
+            <Input defaultValue="admin@fitcntrl.com" />
           </div>
           <div className="grid gap-2">
             <Label>Support Phone</Label>

@@ -6,6 +6,8 @@ import { Button } from '@/components/ui/button';
 import { Lock, KeyRound, ShieldCheck, ArrowLeft, Mail } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/AuthContext';
+import { authApi } from '@/services/api';
+import { ApiError } from '@/lib/api';
 
 type Step = 'idle' | 'password' | 'otp-send' | 'otp-verify' | 'new-password';
 
@@ -18,12 +20,14 @@ const PasswordResetCard = () => {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [otp, setOtp] = useState('');
   const [loading, setLoading] = useState(false);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
   const resetFields = () => {
     setOldPassword('');
     setNewPassword('');
     setConfirmPassword('');
     setOtp('');
+    setFieldErrors({});
   };
 
   const handleBack = () => {
@@ -31,41 +35,53 @@ const PasswordResetCard = () => {
     setStep('idle');
   };
 
-  const handlePasswordSubmit = () => {
-    if (!oldPassword) {
-      toast({ title: 'Error', description: 'Please enter your old password.', variant: 'destructive' });
+  const handlePasswordSubmit = async () => {
+    const errors: Record<string, string> = {};
+    if (!oldPassword) errors.oldPassword = 'Old password is required';
+    if (!newPassword || newPassword.length < 8) errors.newPassword = 'New password must be at least 8 characters';
+    if (newPassword !== confirmPassword) errors.confirmPassword = 'Passwords do not match';
+    if (Object.keys(errors).length > 0) {
+      setFieldErrors(errors);
       return;
     }
-    if (!newPassword || newPassword.length < 6) {
-      toast({ title: 'Error', description: 'New password must be at least 6 characters.', variant: 'destructive' });
-      return;
-    }
-    if (newPassword !== confirmPassword) {
-      toast({ title: 'Error', description: 'Passwords do not match.', variant: 'destructive' });
-      return;
-    }
+    setFieldErrors({});
     setLoading(true);
-    setTimeout(() => {
+    try {
+      await authApi.resetPassword({ oldPassword, newPassword });
       setLoading(false);
       toast({ title: 'Password Updated', description: 'Your password has been changed successfully.' });
       handleBack();
-    }, 1200);
+    } catch (error) {
+      setLoading(false);
+      const message = error instanceof ApiError ? error.message : 'Failed to update password';
+      toast({ title: 'Error', description: message, variant: 'destructive' });
+    }
   };
 
-  const handleSendOtp = () => {
+  const handleSendOtp = async () => {
+    if (!user?.email) {
+      toast({ title: 'Error', description: 'User email is unavailable.', variant: 'destructive' });
+      return;
+    }
     setLoading(true);
-    setTimeout(() => {
+    try {
+      await authApi.forgotPassword({ email: user.email });
       setLoading(false);
       toast({ title: 'OTP Sent', description: `A verification code has been sent to ${user?.email || 'your email'}.` });
       setStep('otp-verify');
-    }, 1000);
+    } catch (error) {
+      setLoading(false);
+      const message = error instanceof ApiError ? error.message : 'Failed to send OTP';
+      toast({ title: 'Error', description: message, variant: 'destructive' });
+    }
   };
 
   const handleVerifyOtp = () => {
     if (otp.length < 4) {
-      toast({ title: 'Error', description: 'Please enter a valid OTP.', variant: 'destructive' });
+      setFieldErrors({ otp: 'Please enter a valid OTP' });
       return;
     }
+    setFieldErrors({});
     setLoading(true);
     setTimeout(() => {
       setLoading(false);
@@ -74,21 +90,30 @@ const PasswordResetCard = () => {
     }, 1000);
   };
 
-  const handleNewPasswordSubmit = () => {
-    if (!newPassword || newPassword.length < 6) {
-      toast({ title: 'Error', description: 'New password must be at least 6 characters.', variant: 'destructive' });
+  const handleNewPasswordSubmit = async () => {
+    const errors: Record<string, string> = {};
+    if (!newPassword || newPassword.length < 8) errors.newPassword = 'New password must be at least 8 characters';
+    if (newPassword !== confirmPassword) errors.confirmPassword = 'Passwords do not match';
+    if (Object.keys(errors).length > 0) {
+      setFieldErrors(errors);
       return;
     }
-    if (newPassword !== confirmPassword) {
-      toast({ title: 'Error', description: 'Passwords do not match.', variant: 'destructive' });
+    setFieldErrors({});
+    if (!user?.email) {
+      toast({ title: 'Error', description: 'User email is unavailable.', variant: 'destructive' });
       return;
     }
     setLoading(true);
-    setTimeout(() => {
+    try {
+      await authApi.verifyCode({ email: user.email, code: otp, newPassword });
       setLoading(false);
       toast({ title: 'Password Updated', description: 'Your password has been reset successfully.' });
       handleBack();
-    }, 1200);
+    } catch (error) {
+      setLoading(false);
+      const message = error instanceof ApiError ? error.message : 'Failed to reset password';
+      toast({ title: 'Error', description: message, variant: 'destructive' });
+    }
   };
 
   const maskedEmail = user?.email
@@ -130,6 +155,7 @@ const PasswordResetCard = () => {
                 value={oldPassword}
                 onChange={e => setOldPassword(e.target.value)}
               />
+              {fieldErrors.oldPassword && <p className="text-xs text-destructive">{fieldErrors.oldPassword}</p>}
             </div>
             <div className="grid gap-2">
               <Label>New Password</Label>
@@ -139,6 +165,7 @@ const PasswordResetCard = () => {
                 value={newPassword}
                 onChange={e => setNewPassword(e.target.value)}
               />
+              {fieldErrors.newPassword && <p className="text-xs text-destructive">{fieldErrors.newPassword}</p>}
             </div>
             <div className="grid gap-2">
               <Label>Confirm New Password</Label>
@@ -148,6 +175,7 @@ const PasswordResetCard = () => {
                 value={confirmPassword}
                 onChange={e => setConfirmPassword(e.target.value)}
               />
+              {fieldErrors.confirmPassword && <p className="text-xs text-destructive">{fieldErrors.confirmPassword}</p>}
             </div>
             <div className="flex items-center justify-between flex-wrap gap-2">
               <Button onClick={handlePasswordSubmit} disabled={loading}>
@@ -205,6 +233,7 @@ const PasswordResetCard = () => {
                 onChange={e => setOtp(e.target.value.replace(/\D/g, ''))}
                 className="max-w-[200px] tracking-widest text-center text-lg"
               />
+              {fieldErrors.otp && <p className="text-xs text-destructive">{fieldErrors.otp}</p>}
             </div>
             <div className="flex items-center gap-3 flex-wrap">
               <Button onClick={handleVerifyOtp} disabled={loading}>
@@ -234,6 +263,7 @@ const PasswordResetCard = () => {
                 value={newPassword}
                 onChange={e => setNewPassword(e.target.value)}
               />
+              {fieldErrors.newPassword && <p className="text-xs text-destructive">{fieldErrors.newPassword}</p>}
             </div>
             <div className="grid gap-2">
               <Label>Confirm New Password</Label>
@@ -243,6 +273,7 @@ const PasswordResetCard = () => {
                 value={confirmPassword}
                 onChange={e => setConfirmPassword(e.target.value)}
               />
+              {fieldErrors.confirmPassword && <p className="text-xs text-destructive">{fieldErrors.confirmPassword}</p>}
             </div>
             <Button onClick={handleNewPasswordSubmit} disabled={loading}>
               {loading ? 'Updating…' : 'Update Password'}
