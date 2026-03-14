@@ -55,8 +55,10 @@ interface AuthContextType {
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
+const canUseStorage = () => typeof window !== "undefined";
 
 const getSavedUser = (): User | null => {
+  if (!canUseStorage()) return null;
   const raw = localStorage.getItem(AUTH_USER_KEY);
   if (!raw) return null;
   try {
@@ -67,6 +69,7 @@ const getSavedUser = (): User | null => {
 };
 
 const saveUser = (user: User | null) => {
+  if (!canUseStorage()) return;
   if (!user) {
     localStorage.removeItem(AUTH_USER_KEY);
     return;

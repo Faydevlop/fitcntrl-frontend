@@ -30,18 +30,22 @@ const ACCESS_TOKEN_KEY = "gymflow_access_token";
 const REFRESH_TOKEN_KEY = "gymflow_refresh_token";
 export const AUTH_USER_KEY = "gymflow_user";
 const DEMO_DB_KEY = "gymflow_use_demo_db";
+const canUseStorage = () => typeof window !== "undefined";
 
 const fallbackBase = "http://localhost:4000/api";
-const rawBase = (import.meta.env.VITE_API_BASE_URL as string | undefined) || fallbackBase;
+const rawBase = process.env.NEXT_PUBLIC_API_BASE_URL || fallbackBase;
 export const API_BASE_URL = rawBase.replace(/\/+$/, "");
 
-const rawDemoEnv = import.meta.env.VITE_USE_DEMO_DB as string | undefined;
+const rawDemoEnv = process.env.NEXT_PUBLIC_USE_DEMO_DB;
 const envDemoFlag = rawDemoEnv ? rawDemoEnv.toLowerCase() === "true" : false;
 
-export const getAccessToken = (): string | null => localStorage.getItem(ACCESS_TOKEN_KEY);
-export const getRefreshToken = (): string | null => localStorage.getItem(REFRESH_TOKEN_KEY);
+export const getAccessToken = (): string | null =>
+  canUseStorage() ? localStorage.getItem(ACCESS_TOKEN_KEY) : null;
+export const getRefreshToken = (): string | null =>
+  canUseStorage() ? localStorage.getItem(REFRESH_TOKEN_KEY) : null;
 
 export const setAuthTokens = (accessToken: string, refreshToken?: string | null) => {
+  if (!canUseStorage()) return;
   localStorage.setItem(ACCESS_TOKEN_KEY, accessToken);
   if (refreshToken) {
     localStorage.setItem(REFRESH_TOKEN_KEY, refreshToken);
@@ -49,11 +53,13 @@ export const setAuthTokens = (accessToken: string, refreshToken?: string | null)
 };
 
 export const clearAuthTokens = () => {
+  if (!canUseStorage()) return;
   localStorage.removeItem(ACCESS_TOKEN_KEY);
   localStorage.removeItem(REFRESH_TOKEN_KEY);
 };
 
 export const getUseDemoDb = (): boolean => {
+  if (!canUseStorage()) return envDemoFlag;
   const stored = localStorage.getItem(DEMO_DB_KEY);
   if (stored === "true") return true;
   if (stored === "false") return false;
@@ -61,6 +67,7 @@ export const getUseDemoDb = (): boolean => {
 };
 
 export const setUseDemoDb = (enabled: boolean) => {
+  if (!canUseStorage()) return;
   localStorage.setItem(DEMO_DB_KEY, enabled ? "true" : "false");
 };
 
